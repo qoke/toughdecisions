@@ -144,7 +144,11 @@ type Flag struct {
 const flagCols = `id, created_at, grade_id, response_id, type, passage,
 	violated, status, resolution_note, run_id`
 
-// InsertFlag inserts a flag row with status open by default.
+// InsertFlag inserts a flag row with status open by default. The
+// (grade_id, type, passage, violated) identity is UNIQUE (migration
+// 0003_flag_dedupe): a concurrent duplicate insert is a no-op that returns
+// the existing row instead of erroring, mirroring the InsertGrade reuse
+// path. Callers must use the returned row as canonical.
 func (db *DB) InsertFlag(f *Flag) (*Flag, error) {
 	if f.GradeID == "" {
 		return nil, errors.New("store: insert flag: empty grade_id")
@@ -165,13 +169,26 @@ func (db *DB) InsertFlag(f *Flag) (*Flag, error) {
 		RunID:          f.RunID,
 	}
 	if _, err := db.db.Exec(
-		`INSERT INTO flags (`+flagCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO flags (`+flagCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(grade_id, type, passage, violated) DO NOTHING`,
 		row.ID, row.CreatedAt, row.GradeID, row.ResponseID, row.Type, row.Passage,
 		row.Violated, row.Status, row.ResolutionNote, row.RunID,
 	); err != nil {
 		return nil, fmt.Errorf("store: insert flag: %w", err)
 	}
-	return row, nil
+	existing, rerr := db.GetFlagByIdentity(row.GradeID, row.Type, row.Passage, row.Violated)
+	if rerr != nil {
+		return nil, fmt.Errorf("store: insert flag read back: %w", rerr)
+	}
+	return existing, nil
+}
+
+// GetFlagByIdentity selects a flag by its dedupe identity
+// (grade_id, type, passage, violated) created in migration 0003_flag_dedupe.
+func (db *DB) GetFlagByIdentity(gradeID, flagType, passage, violated string) (*Flag, error) {
+	row := db.db.QueryRow(`SELECT `+flagCols+` FROM flags WHERE grade_id = ? AND type = ? AND passage = ? AND violated = ?`,
+		gradeID, flagType, passage, violated)
+	return scanFlag(row)
 }
 
 // GetFlag selects a flag by id.

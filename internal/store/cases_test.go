@@ -12,8 +12,8 @@ func TestHarnessMigrationApplies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppliedMigrations: %v", err)
 	}
-	if len(applied) != 2 || applied[0] != "0001_init" || applied[1] != "0002_harness" {
-		t.Fatalf("applied = %v, want [0001_init 0002_harness]", applied)
+	if len(applied) != 3 || applied[0] != "0001_init" || applied[1] != "0002_harness" || applied[2] != "0003_flag_dedupe" {
+		t.Fatalf("applied = %v, want [0001_init 0002_harness 0003_flag_dedupe]", applied)
 	}
 	for _, table := range []string{
 		"families", "cases", "bundles", "grader_configs", "calibration_items",

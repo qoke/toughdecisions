@@ -31,8 +31,8 @@ func TestOpenCreatesFileAndAppliesMigrationOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppliedMigrations: %v", err)
 	}
-	if len(applied) != 2 || applied[0] != "0001_init" || applied[1] != "0002_harness" {
-		t.Fatalf("applied = %v, want [0001_init 0002_harness]", applied)
+	if len(applied) != 3 || applied[0] != "0001_init" || applied[1] != "0002_harness" || applied[2] != "0003_flag_dedupe" {
+		t.Fatalf("applied = %v, want [0001_init 0002_harness 0003_flag_dedupe]", applied)
 	}
 	var mode string
 	if err := db.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
@@ -52,8 +52,8 @@ func TestOpenCreatesFileAndAppliesMigrationOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppliedMigrations: %v", err)
 	}
-	if len(applied2) != 2 {
-		t.Fatalf("second open applied = %v, want exactly 2", applied2)
+	if len(applied2) != 3 {
+		t.Fatalf("second open applied = %v, want exactly 3", applied2)
 	}
 }
 
