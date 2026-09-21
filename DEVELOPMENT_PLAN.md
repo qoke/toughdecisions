@@ -266,7 +266,7 @@ type Judge struct {
     ChangeCourseIf, UnresolvedDisagreement string
 }
 type AbsoluteGrade struct {
-    Scores map[string]int // grounding_calibration, context_values_fidelity, decision_insight, practical_robustness, role_execution
+    Scores map[string]int // grounding_and_calibration, context_and_values_fidelity, decision_insight, practical_robustness, role_execution
     SupportingPassages map[string]string
     MostConsequentialWeakness *struct{ Passage, Explanation string }
     Flags []struct{ Type, Passage, Violated string } // fabrication|ignored_danger_or_impossibility|coercive|invented_commitment|values_substitution|misrepresentation
@@ -471,7 +471,7 @@ council feedback summary --days 7
 ```
 Exit codes: 0 ok, 1 error, 2 validation failure, 3 blocked (grader drift / checklist fail).
 
-**Bootstrap sequence (README):** `db migrate` → `pack init` → `serve` (production is usable from here) → author `casepack/` and `calibration.yaml` → `cases load` → `graders calibrate --all` → `harness compare` with the initial pack as sole candidate is unnecessary: instead `pack publish --baselines-only` (flag that only fills `baselines` for the active pack) → schedule `harness weekly --notify`.
+**Bootstrap sequence (README):** `db migrate` → `pack init` → `serve` (production is usable from here) → author `casepack/` and `calibration.yaml` → `cases load` → `graders calibrate --all` → `harness compare --candidate <key>` with the initial pack as sole candidate is unnecessary: instead `pack publish --baselines-only` (flag that only fills `baselines` for the active pack) → schedule `harness weekly --notify`.
 
 ## 14. n8n integration
 

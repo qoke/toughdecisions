@@ -46,7 +46,10 @@ LiteLLM proxy aliases used by the council must have:
 
 The client never sends `fallbacks`, `num_retries`, or `drop_params`, and only
 includes `temperature`/`top_p`/`reasoning_effort` when set. `max_completion_tokens`
-is always set.
+is always set. LiteLLM returns a deployment hash (64-hex) in the
+`x-litellm-model-id` response header; substitution detection ignores it and
+reads the response body `model` field instead, so a hash there is expected,
+not an error.
 
 ## Configuration
 
@@ -63,12 +66,24 @@ Config loads from `COUNCIL_`-prefixed env vars with these defaults:
 | `candidates_file` | `./config/candidates.yaml` |
 | `views_deadline` / `judge_deadline` | `30s` |
 
+`gateway_base_url` (`COUNCIL_GATEWAY_BASE_URL`) is the LiteLLM proxy root
+**without** `/v1`: canonical `http://127.0.0.1:4000` (the code default
+`http://localhost:4000` is the local equivalent). The client appends
+`/v1/chat/completions`, so a base ending in `/v1` or `/` is normalised away
+but is not canonical.
+
 Repo config: `config/pack.yaml` (4 seats: possibility, perspective,
 stress_tester, judge; views 2000 tokens, judge 3000), `config/models.yaml`
-(capabilities for every referenced model), `config/graders.yaml` (two
+(**a template, not a runnable config**), `config/graders.yaml` (two
 admitted selection graders from different families, one screening grader,
 one substitute grader), `config/candidates.yaml` (example view + judge
 challengers, max 3; empty list skips screen/compare/downstream).
+
+`config/models.yaml` must be adapted to the target proxy before use: each
+`id` is sent **verbatim** as the request model (there is no alias
+indirection), so every `id` must be a model that proxy actually serves, and
+every `expected_response_model_prefixes` entry must match what that
+deployment returns for that model.
 
 ## Harness ops
 

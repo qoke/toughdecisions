@@ -1,3 +1,8 @@
+# Template, not a runnable config: each `id` is sent verbatim as the request
+# `model` (there is no alias indirection). Adapt every `id` to a model the
+# target LiteLLM proxy actually serves, and set each
+# `expected_response_model_prefixes` entry to the prefix that deployment
+# returns for that model.
 models:
   - id: council-view-a
     family: openai
