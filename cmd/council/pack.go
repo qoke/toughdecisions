@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"sort"
 
+	"github.com/qoke/toughdecisions/internal/harness"
+	"github.com/qoke/toughdecisions/internal/logx"
 	"github.com/qoke/toughdecisions/internal/models"
 	"github.com/qoke/toughdecisions/internal/pack"
 )
@@ -78,11 +82,56 @@ func packShow(args []string) int {
 	return exitOK
 }
 
-// packPublish is blocked until Phase 5: publishing requires the harness
-// promotion checklist. Exit 3 (blocked) per the CLI contract.
-func packPublish([]string) int {
-	fmt.Fprintf(os.Stderr, "pack publish: blocked: requires harness run (Phase 5)\n")
-	return exitBlocked
+// packPublish publishes a candidate pack after its promotion checklist
+// passes. A failing checklist refuses with exit 3 unless --force records
+// the override. --baselines-only fills baselines for the active pack.
+func packPublish(args []string) int {
+	fs := flag.NewFlagSet("pack publish", flag.ContinueOnError)
+	runID := fs.String("run", "", "harness run id")
+	candidate := fs.String("candidate", "", "candidate key")
+	force := fs.Bool("force", false, "publish despite a failing checklist (recorded)")
+	baselinesOnly := fs.Bool("baselines-only", false, "fill baselines for the active pack without publishing")
+	if err := fs.Parse(args); err != nil {
+		return exitValidation
+	}
+	db, cfg, err := openStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pack publish: %v\n", err)
+		return exitError
+	}
+	defer db.Close()
+	mreg, err := models.LoadRegistry(cfg.ModelsFile())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pack publish: %v\n", err)
+		return exitError
+	}
+	log := logx.New(cfg)
+	gw := gatewayFactory(cfg, log)
+	r := harness.NewRunner(db, gw, cfg, log, mreg)
+	res, err := r.Publish(context.Background(), harness.PublishOptions{
+		RunID: *runID, CandidateKey: *candidate,
+		Force: *force, BaselinesOnly: *baselinesOnly,
+	})
+	if err != nil {
+		var blocked *harness.ChecklistBlockedError
+		if errors.As(err, &blocked) {
+			fmt.Fprintf(os.Stderr, "pack publish: %v\n", err)
+			return exitBlocked
+		}
+		fmt.Fprintf(os.Stderr, "pack publish: %v\n", err)
+		return exitError
+	}
+	if *baselinesOnly {
+		fmt.Printf("pack publish: ok (baselines-only pack=%s baselines=%d bundles=%d)\n",
+			res.Pack.ID, res.Baselines, res.Bundles)
+		return exitOK
+	}
+	msg := "pack publish: ok"
+	if res.Forced {
+		msg += " (forced)"
+	}
+	fmt.Printf("%s (pack=%s baselines=%d bundles=%d)\n", msg, res.Pack.ID, res.Baselines, res.Bundles)
+	return exitOK
 }
 
 func packRollback([]string) int {

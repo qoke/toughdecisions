@@ -159,3 +159,15 @@ func scanCandidate(row packRow) (*Candidate, error) {
 	c.Finalist = finalist != 0
 	return &c, nil
 }
+
+// LatestCandidateRunID returns the most recently created candidates row's
+// run id that already holds a compare result. CLI tests use it to resolve
+// the compare run id for downstream (screen rows have no compare result).
+func (db *DB) LatestCandidateRunID() (string, error) {
+	var id string
+	err := db.db.QueryRow(`SELECT run_id FROM candidates WHERE compare_result_json IS NOT NULL ORDER BY created_at DESC LIMIT 1`).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("store: latest candidate run: %w", err)
+	}
+	return id, nil
+}

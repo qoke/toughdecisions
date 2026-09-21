@@ -65,8 +65,44 @@ Config loads from `COUNCIL_`-prefixed env vars with these defaults:
 
 Repo config: `config/pack.yaml` (4 seats: possibility, perspective,
 stress_tester, judge; views 2000 tokens, judge 3000), `config/models.yaml`
-(capabilities for every referenced model), `config/graders.yaml` (placeholder
-selection/screening/substitute graders), `config/candidates.yaml` (empty).
+(capabilities for every referenced model), `config/graders.yaml` (two
+admitted selection graders from different families, one screening grader,
+one substitute grader), `config/candidates.yaml` (example view + judge
+challengers, max 3; empty list skips screen/compare/downstream).
+
+## Harness ops
+
+Cache keys (R-25 / §15) — changing the shared instructions invalidates the
+response cache (`prompt_pack_hash` feeds `store.ResponseCacheKey`); changing
+a grader (`config_hash`) or the rubric invalidates the grade cache while the
+response cache still hits; `--fresh` inserts with `MaxRepetition()+1`, so it
+always produces a new response key. A grader `config_hash` change starts
+unadmitted — recalibrate before compare.
+
+n8n wiring (§14): n8n is not in the live path. A Schedule node runs
+`council harness weekly --notify`, and when `notify_webhook_url` is set the
+report step `POST`s `{run_id, summary, report_markdown}` to that webhook
+(n8n → email/chat). Promotion stays manual: `council pack publish
+--run <id> --candidate <key>` (refuses on a failing checklist unless
+`--force`). Optionally n8n polls `GET /api/metrics/summary`.
+
+Full bootstrap (copy-paste; sentinel refuses until baselines exist, so the
+baselines step must come before the first weekly run):
+
+```sh
+council db migrate
+council pack init --file config/pack.yaml
+council serve                                    # production usable from here
+# --- harness setup ---
+# author casepack/ and casepack/calibration.yaml, then:
+council cases validate
+council cases load
+council graders calibrate --all
+council graders status                           # both selection graders admitted
+council pack publish --baselines-only            # fill baselines for the active pack
+council harness sentinel                         # fails naming --baselines-only if skipped
+council harness weekly --notify                  # full run: sentinel,screen,compare,downstream,report
+```
 
 ## What is implemented vs deferred
 
@@ -75,8 +111,8 @@ assembly, lenient schema parsing, model capabilities + pack init/show/rollback,
 production pipeline, HTTP API + SSE + UI, `db migrate`, `pack init|show|rollback`,
 `feedback summary`.
 
-Deferred: Phase 3 (`cases validate|load`, casepack authoring), Phase 4
-(`graders calibrate|status`, `flags …`, grading), Phase 5 (`harness …`,
-`pack publish`), Phase 6 (`db prune`, retention). Their CLI entries print
-`not implemented until Phase N`; `pack publish` exits 3 (blocked: requires
-harness run).
+Deferred: none — Phases 3–6 are wired (`cases validate|load`,
+`graders calibrate|status`, `flags …`, `harness weekly|sentinel|screen|
+compare|downstream|report`, `pack publish` with checklist/force,
+`db prune` with retention). `pack publish` exits 3 on a failing checklist
+without `--force`; grader drift exits 3.

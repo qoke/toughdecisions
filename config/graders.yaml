@@ -1,20 +1,44 @@
+# Example grader configuration (DEVELOPMENT_PLAN.md §10-§11).
+#
+# Consumed by `council graders calibrate --all` / `council graders status`.
+# Each grader grades blind: it never sees model identities or prior results.
+#
+# Roles:
+#   selection  - the two selection graders used for compare/pairwise steps
+#                (must be ADMITTED and from DIFFERENT families).
+#   screening  - the screening grader used for candidate screening (§12.2).
+#   substitute - used only when a selection grader shares the response family
+#                (SelectGrader routes to it; grading FAILS if it is unadmitted).
+#
+# config_hash semantics: any change to a grader entry (model, family, params)
+# produces a NEW config_hash row that starts unadmitted (admitted=false) until
+# `council graders calibrate` passes. A config_hash change INVALIDATES the
+# grade cache (grade MISS) while the response cache still HITS.
 graders:
-  - key: grader-a
+  # Selection grader A: OpenAI family.
+  - key: selection-a
     model: council-judge-a
     family: openai
     role: selection
-    max_output_tokens: 2000
-  - key: grader-b
+    max_output_tokens: 3000
+
+  # Selection grader B: Anthropic family (different family from grader A).
+  - key: selection-b
     model: council-view-b
     family: anthropic
     role: selection
-    max_output_tokens: 2000
-  - key: grader-screen
+    max_output_tokens: 3000
+
+  # Screening grader for the §12.2 screen step.
+  - key: screening-a
     model: council-view-a
     family: openai
     role: screening
     max_output_tokens: 2000
-  - key: grader-sub
+
+  # Substitute grader: picked only on self-grading conflicts, so its family
+  # must differ from the response family at call time.
+  - key: substitute-a
     model: council-view-c
     family: google
     role: substitute
