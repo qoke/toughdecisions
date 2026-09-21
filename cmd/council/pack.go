@@ -36,16 +36,10 @@ func packInit(args []string) int {
 		fmt.Fprintf(os.Stderr, "pack init: %v\n", err)
 		return exitError
 	}
-	p, err := pack.Init(db, *file)
+	p, err := pack.InitValidated(db, *file, mreg.ValidateSettings)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pack init: %v\n", err)
 		return exitValidation
-	}
-	for _, seat := range pack.AllSeats {
-		if err := mreg.ValidateSettings(p.Seats[seat]); err != nil {
-			fmt.Fprintf(os.Stderr, "pack init: seat %q: %v\n", seat, err)
-			return exitValidation
-		}
 	}
 	fmt.Printf("pack init: ok (id=%s)\n", p.ID)
 	return exitOK

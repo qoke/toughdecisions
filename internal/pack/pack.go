@@ -185,6 +185,54 @@ func Init(db *store.DB, file string) (*Pack, error) {
 	return insertPack(db, seats, StatusActive, "")
 }
 
+// LoadSeats parses a seats YAML file without persisting anything. It lets
+// callers validate every seat (e.g. model settings against the models
+// registry) BEFORE any pack row is written, so a rejected init leaves the
+// store untouched. See InitValidated.
+func LoadSeats(file string) (map[Seat]SeatConfig, error) {
+	return loadSeats(file)
+}
+
+// InsertActive persists an already-validated seats map as the active pack.
+// Callers must validate seats before calling: this function persists
+// unconditionally.
+func InsertActive(db *store.DB, seats map[Seat]SeatConfig) (*Pack, error) {
+	for _, seat := range AllSeats {
+		if _, ok := seats[seat]; !ok {
+			return nil, fmt.Errorf("pack: missing seat %q", seat)
+		}
+	}
+	return insertPack(db, seats, StatusActive, "")
+}
+
+// InitValidated loads a seats YAML file, runs validate over every seat, and
+// only then persists the pack as active. Validation (e.g. model settings
+// against the models registry) therefore happens BEFORE any persistence or
+// activation: a failed init writes no pack row and leaves no active pack
+// behind. validate lives with the caller because the models registry
+// imports this package (pack -> models would be an import cycle), and the
+// CLI already owns the registry handle.
+//
+// A nil validate keeps the legacy load-then-persist behavior.
+func InitValidated(db *store.DB, file string, validate func(SeatConfig) error) (*Pack, error) {
+	seats, err := loadSeats(file)
+	if err != nil {
+		return nil, err
+	}
+	if validate != nil {
+		for _, seat := range AllSeats {
+			cfg, ok := seats[seat]
+			if !ok {
+				return nil, fmt.Errorf("pack: missing seat %q", seat)
+			}
+			if err := validate(cfg); err != nil {
+				return nil, fmt.Errorf("pack: seat %q: %w", seat, err)
+			}
+		}
+	}
+	return insertPack(db, seats, StatusActive, "")
+}
+
 // Active returns the single active pack.
 func Active(db *store.DB) (*Pack, error) {
 	row, err := db.Active()
