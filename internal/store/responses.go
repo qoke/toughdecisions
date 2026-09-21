@@ -63,6 +63,23 @@ func (db *DB) InsertResponse(r *Response) (*Response, error) {
 	return r, nil
 }
 
+// SetResponseWordCountIfMissing stores word_count computed while grading.
+// It is the only mutation of the responses table graders are allowed to
+// make; callers must not overwrite a non-zero word_count.
+func (db *DB) SetResponseWordCountIfMissing(id string, wordCount int) error {
+	res, err := db.db.Exec(
+		`UPDATE responses SET word_count=? WHERE id=? AND word_count=0`,
+		wordCount, id,
+	)
+	if err != nil {
+		return fmt.Errorf("store: set response word_count: %w", err)
+	}
+	if _, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: set response word_count rows: %w", err)
+	}
+	return nil
+}
+
 // GetResponse selects a response by id.
 func (db *DB) GetResponse(id string) (*Response, error) {
 	row := db.db.QueryRow(`SELECT `+responseCols+` FROM responses WHERE id = ?`, id)
