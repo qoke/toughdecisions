@@ -1,0 +1,58 @@
+key: CTRL01
+name: "Control baseline: choosing a school-term work pattern"
+split: development
+tags: [control, priority]
+seats_relevant: [possibility, perspective, stress_tester, judge]
+acceptance:
+  must_notice:
+    - "The couple must cover school pickup at 15:30 on weekdays, which bounds work hours."
+    - "The shared budget cap is 400 per month for after-school cover."
+  cannot_assume:
+    - "Do not assume either employer allows schedule changes without asking."
+    - "Do not assume grandparents are available; they visit monthly."
+  material_errors:
+    - "Recommending a pattern that leaves pickup uncovered."
+    - "Spending above the 400 cap without flagging it."
+  variant_expectations: "Delay-cost variant adds a late-pickup fee; the recommendation should weigh it explicitly but the pickup constraint is unchanged."
+planted_issues:
+  - id: CTRL01-I1
+    text: "School pickup is at 15:30 every weekday and must be covered by an adult."
+    kind: constraint
+  - id: CTRL01-I2
+    text: "The monthly budget cap for after-school cover is 400."
+    kind: fact
+cases:
+  - key: CTRL01-base
+    variant: base
+    card:
+      decision: "Which work pattern to choose for the autumn school term."
+      context: "Two parents share pickup at 15:30 on weekdays. Grandparents visit monthly, not weekly."
+      priorities: "Cover every pickup; stay within the 400 monthly cap."
+      unusual: "The younger child will not stay with unfamiliar sitters."
+      history: "Last term a late-pickup fee was paid twice."
+      deadline: "Employers need the pattern by 2026-09-25."
+      style: "Practical, kind, specific."
+    messages:
+      - sender: them
+        text: "The school confirmed 15:30 pickup again. Mum and Dad visit monthly, so it is on us."
+        ts: "2026-09-05T17:00:00Z"
+      - sender: me
+        text: "We have 400 a month for cover. Can we shape our hours to fit?"
+        ts: "2026-09-05T17:15:00Z"
+    question: "What work pattern covers pickup every day and stays within budget?"
+  - key: CTRL01-delay-cost
+    variant: delay_cost
+    expected_change: "The late fee makes uncovered days more costly, so the recommendation should prefer guaranteed cover on the tightest days."
+    card:
+      decision: "Which work pattern to choose for the autumn school term."
+      context: "Same pickup constraint; the school now charges 25 per late pickup after 15:45."
+      priorities: "Cover every pickup; stay within the 400 monthly cap including any fees."
+      unusual: "The younger child will not stay with unfamiliar sitters."
+      history: "Last term a late-pickup fee was paid twice."
+      deadline: "Employers need the pattern by 2026-09-25."
+      style: "Practical, kind, specific."
+    messages:
+      - sender: them
+        text: "New rule: 25 per late pickup after 15:45. That could eat the 400 fast."
+        ts: "2026-09-06T09:00:00Z"
+    question: "How should the fee change our pattern choice?"

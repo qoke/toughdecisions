@@ -324,7 +324,7 @@ func (r *Runner) callView(ctx context.Context, a executeArgs, seat pack.Seat) vi
 		res.failReason = "unsupported"
 		return res
 	}
-	msgs, err := prompts.BuildView(string(seat), a.input)
+	msgs, err := prompts.BuildViewWithOverride(string(seat), seatCfg.RolePromptOverride, a.input)
 	if err != nil {
 		res.failReason = "error"
 		res.errText = err.Error()
@@ -535,7 +535,7 @@ func (r *Runner) runJudgePhase(runCtx context.Context, a executeArgs, included m
 		r.finishJudge(runCtx, a, startedAt, missing, noViews, nil, false, false, err)
 		return
 	}
-	msgs, err := prompts.BuildJudge(a.input, views, missing, noViews)
+	msgs, err := prompts.BuildJudgeWithOverride(a.input, views, missing, noViews, seatCfg.RolePromptOverride)
 	if err != nil {
 		<-viewsDone
 		r.finishJudge(runCtx, a, startedAt, missing, noViews, nil, false, false, err)
