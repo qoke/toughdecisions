@@ -2,6 +2,8 @@
 // the production/assembler input types, and a lenient JSON parser.
 package schema
 
+import "encoding/json"
+
 // Danger is a credible-urgent-danger flag present in views and judges.
 type Danger struct {
 	Present bool   `json:"present"`
@@ -119,8 +121,9 @@ type RenderedView struct {
 	UrgentDanger        Danger
 }
 
-// ViewJSONSchema is the JSON Schema for View outputs.
-const ViewJSONSchema = `{
+// viewJSONSchemaTmpl is the raw template for the View output JSON Schema.
+// ViewJSONSchema is its strict-mode-normalized form; use that at call sites.
+const viewJSONSchemaTmpl = `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "view",
   "type": "object",
@@ -140,8 +143,9 @@ const ViewJSONSchema = `{
   "additionalProperties": false
 }`
 
-// JudgeJSONSchema is the JSON Schema for Judge outputs.
-const JudgeJSONSchema = `{
+// judgeJSONSchemaTmpl is the raw template for the Judge output JSON Schema.
+// JudgeJSONSchema is its strict-mode-normalized form; use that at call sites.
+const judgeJSONSchemaTmpl = `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "judge",
   "type": "object",
@@ -165,3 +169,53 @@ const JudgeJSONSchema = `{
   },
   "additionalProperties": false
 }`
+
+// ViewJSONSchema is the strict-mode-normalized View output JSON Schema:
+// every object at every nesting depth carries "additionalProperties": false,
+// as required by OpenAI-family structured outputs when strict is true.
+// Normalization runs centrally here so no call site can regress.
+var ViewJSONSchema = mustStrictNormalize(viewJSONSchemaTmpl)
+
+// JudgeJSONSchema is the strict-mode-normalized Judge output JSON Schema.
+// See ViewJSONSchema for the invariant.
+var JudgeJSONSchema = mustStrictNormalize(judgeJSONSchemaTmpl)
+
+// mustStrictNormalize parses a raw schema template and sets
+// "additionalProperties": false on every object node recursively
+// (root, nested properties, array items, and combinators). It panics on
+// invalid input because the templates are compile-time constants.
+func mustStrictNormalize(tmpl string) string {
+	var v any
+	if err := json.Unmarshal([]byte(tmpl), &v); err != nil {
+		panic("schema: invalid template: " + err.Error())
+	}
+	strictWalk(v)
+	out, err := json.Marshal(v)
+	if err != nil {
+		panic("schema: marshal normalized: " + err.Error())
+	}
+	return string(out)
+}
+
+// strictWalk sets additionalProperties=false on every map that declares
+// type object (explicitly or implicitly via properties/required), then
+// recurses into every child value so no nesting depth can regress.
+func strictWalk(v any) {
+	switch n := v.(type) {
+	case map[string]any:
+		if typ, ok := n["type"].(string); ok && typ == "object" {
+			n["additionalProperties"] = false
+		} else if _, ok := n["properties"]; ok {
+			n["additionalProperties"] = false
+		} else if _, ok := n["required"]; ok {
+			n["additionalProperties"] = false
+		}
+		for _, child := range n {
+			strictWalk(child)
+		}
+	case []any:
+		for _, child := range n {
+			strictWalk(child)
+		}
+	}
+}
