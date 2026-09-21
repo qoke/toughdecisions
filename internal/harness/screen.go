@@ -300,7 +300,7 @@ func (r *Runner) screenOne(ctx context.Context, runID string, pk *pack.Pack, scr
 		}
 	}
 
-	criteria := []string{"grounding_calibration", "context_values_fidelity", "decision_insight", "practical_robustness", "role_execution"}
+	criteria := []string{"grounding_and_calibration", "context_and_values_fidelity", "decision_insight", "practical_robustness", "role_execution"}
 	sums := map[string]float64{}
 	var candTotal, incTotal float64
 	wins := 0

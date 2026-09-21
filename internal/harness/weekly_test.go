@@ -177,7 +177,7 @@ func TestWeeklyDriftBlockedBeforeCompare(t *testing.T) {
 	reports := weeklyEnv(t, cands)
 	zeroFlag := func() gateway.Step {
 		return gateway.Step{Content: hGradeJSON(map[string]int{
-			"grounding_calibration": 0, "context_values_fidelity": 0,
+			"grounding_and_calibration": 0, "context_and_values_fidelity": 0,
 			"decision_insight": 0, "practical_robustness": 0, "role_execution": 0,
 		}, `{"type":"coercive","passage":"p","violated":"v"}`)}
 	}

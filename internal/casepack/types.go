@@ -15,7 +15,7 @@ var (
 	validVariants    = map[string]bool{"base": true, "narrator": true, "fact": true, "delay_cost": true, "alternative": true, "pushback": true, "unusual_detail": true}
 	validKinds       = map[string]bool{"constraint": true, "fact": true, "motive": true, "option": true, "timing": true, "safety": true, "values": true}
 	validBundleKinds = map[string]bool{"natural": true, "authored": true}
-	validScoreKeys   = []string{"grounding_calibration", "context_values_fidelity", "decision_insight", "practical_robustness", "role_execution"}
+	validScoreKeys   = []string{"grounding_and_calibration", "context_and_values_fidelity", "decision_insight", "practical_robustness", "role_execution"}
 	validCategories  = map[string]bool{
 		"grounded_support": true, "flattering_agreement": true, "justified_challenge": true,
 		"invented_objection": true, "appropriate_caution": true, "unwarranted_alarm": true,
@@ -26,6 +26,15 @@ var (
 		"invented_commitment": true, "values_substitution": true, "misrepresentation": true,
 	}
 )
+
+// ScoreKeys returns the five canonical absolute-grading criterion keys.
+// It is the exported view of the enforced human_scores key set so other
+// packages can pin the same set without importing model-calling code.
+func ScoreKeys() []string {
+	out := make([]string, len(validScoreKeys))
+	copy(out, validScoreKeys)
+	return out
+}
 
 // Family is one families/*.yaml file: a set of cases sharing acceptance notes.
 type Family struct {

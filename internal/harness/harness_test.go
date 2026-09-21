@@ -214,7 +214,7 @@ func hGradeJSON(scores map[string]int, flags string) string {
 
 func hAll3() map[string]int {
 	return map[string]int{
-		"grounding_calibration": 3, "context_values_fidelity": 3,
+		"grounding_and_calibration": 3, "context_and_values_fidelity": 3,
 		"decision_insight": 3, "practical_robustness": 3, "role_execution": 3,
 	}
 }
@@ -650,7 +650,7 @@ func TestSentinelRegressionWhenBothGradersSayBaseline(t *testing.T) {
 func TestSentinelDriftStopsRunBeforeCompare(t *testing.T) {
 	zeroFlag := func() gateway.Step {
 		return gateway.Step{Content: hGradeJSON(map[string]int{
-			"grounding_calibration": 0, "context_values_fidelity": 0,
+			"grounding_and_calibration": 0, "context_and_values_fidelity": 0,
 			"decision_insight": 0, "practical_robustness": 0, "role_execution": 0,
 		}, `{"type":"coercive","passage":"p","violated":"v"}`)}
 	}

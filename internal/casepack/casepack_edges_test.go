@@ -39,7 +39,7 @@ func TestValidateEnumEdges(t *testing.T) {
 		{"calib bad score key", func(p *Pack) {
 			p.Calibration[0].HumanScores = map[string]int{"bogus": 1}
 		}, "score"},
-		{"calib score range", func(p *Pack) { p.Calibration[0].HumanScores["grounding_calibration"] = 9 }, "out of range"},
+		{"calib score range", func(p *Pack) { p.Calibration[0].HumanScores["grounding_and_calibration"] = 9 }, "out of range"},
 		{"calib bad flag", func(p *Pack) { p.Calibration[0].HumanFlags = []string{"bogus"} }, "unknown flag"},
 		{"empty planted", func(p *Pack) {
 			p.Families[0].PlantedIssues = []PlantedIssue{{ID: "", Text: "", Kind: "fact"}}
@@ -69,7 +69,7 @@ func TestValidateEnumEdges(t *testing.T) {
 }
 
 func TestParseCalibrationFlatList(t *testing.T) {
-	items, err := ParseCalibration([]byte("- key: K1\n  case: C\n  seat: judge\n  response_text: r\n  category: infeasible\n  human_scores: {grounding_calibration: 1, context_values_fidelity: 1, decision_insight: 1, practical_robustness: 1, role_execution: 1}\n"))
+	items, err := ParseCalibration([]byte("- key: K1\n  case: C\n  seat: judge\n  response_text: r\n  category: infeasible\n  human_scores: {grounding_and_calibration: 1, context_and_values_fidelity: 1, decision_insight: 1, practical_robustness: 1, role_execution: 1}\n"))
 	if err != nil {
 		t.Fatalf("flat parse: %v", err)
 	}

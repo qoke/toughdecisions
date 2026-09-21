@@ -84,7 +84,7 @@ items:
     seat: possibility
     response_text: "A grounded answer."
     category: grounded_support
-    human_scores: {grounding_calibration: 3, context_values_fidelity: 3, decision_insight: 2, practical_robustness: 3, role_execution: 3}
+    human_scores: {grounding_and_calibration: 3, context_and_values_fidelity: 3, decision_insight: 2, practical_robustness: 3, role_execution: 3}
     human_flags: []
     notes: "Solid."
 `
