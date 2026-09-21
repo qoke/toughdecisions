@@ -51,19 +51,18 @@ func NewRunner(db *store.DB, gw gateway.Client, reg *Registry, cfg *config.Confi
 
 // viewResult is one completed view call delivered to the coordinator.
 type viewResult struct {
-	seat         pack.Seat
-	terminal     bool // complete (usable) as opposed to failed/timed-out
-	usable       bool // first-usable accounting: complete with parsed-or-non-empty text
-	danger       bool
-	caution      string
-	resp         *store.Response
-	view         *schema.View
-	rendered     schema.RenderedView
-	parseOK      bool
-	failReason   string // timeout|error|substituted|unsupported
-	afterTrigger bool
-	timedOut     bool
-	errText      string
+	seat       pack.Seat
+	terminal   bool // complete (usable) as opposed to failed/timed-out
+	usable     bool // first-usable accounting: complete with parsed-or-non-empty text
+	danger     bool
+	caution    string
+	resp       *store.Response
+	view       *schema.View
+	rendered   schema.RenderedView
+	parseOK    bool
+	failReason string // timeout|error|substituted|unsupported
+	timedOut   bool
+	errText    string
 }
 
 // Run persists the run rows and returns the request id immediately; the
@@ -200,7 +199,7 @@ func (r *Runner) execute(runCtx context.Context, runCancel context.CancelFunc, a
 	pending := len(ViewSeats)
 	var judgeDone = make(chan struct{})
 	viewsDrained := make(chan struct{})
-	judgeStartedAt := time.Now()
+	var judgeStartedAt time.Time
 
 loop:
 	for pending > 0 {
@@ -532,13 +531,13 @@ func (r *Runner) runJudgePhase(runCtx context.Context, a executeArgs, included m
 	seatCfg := a.pack.Seats[pack.SeatJudge]
 	if err := r.models.ValidateSettings(seatCfg); err != nil {
 		<-viewsDone
-		r.finishJudge(runCtx, a, startedAt, missing, noViews, nil, false, false, err)
+		r.finishJudge(a, startedAt, missing, noViews, nil, false, false)
 		return
 	}
 	msgs, err := prompts.BuildJudgeWithOverride(a.input, views, missing, noViews, seatCfg.RolePromptOverride)
 	if err != nil {
 		<-viewsDone
-		r.finishJudge(runCtx, a, startedAt, missing, noViews, nil, false, false, err)
+		r.finishJudge(a, startedAt, missing, noViews, nil, false, false)
 		return
 	}
 	gwMsgs := make([]gateway.Message, 0, len(msgs))
@@ -572,7 +571,7 @@ func (r *Runner) runJudgePhase(runCtx context.Context, a executeArgs, included m
 			r.log.Error("council store judge response", "request_id", a.requestID, "err", insertErr)
 			stored = nil
 		}
-		r.finishJudge(runCtx, a, startedAt, missing, noViews, stored, false, timedOut, chatErr)
+		r.finishJudge(a, startedAt, missing, noViews, stored, false, timedOut)
 		return
 	}
 	judge, parseOK := schema.ParseLenient[schema.Judge](chatResp.Content)
@@ -601,19 +600,16 @@ func (r *Runner) runJudgePhase(runCtx context.Context, a executeArgs, included m
 	stored, insertErr := r.db.InsertResponse(respRow)
 	if insertErr != nil {
 		r.log.Error("council store judge response", "request_id", a.requestID, "err", insertErr)
-		r.finishJudge(runCtx, a, startedAt, missing, noViews, nil, false, false, insertErr)
+		r.finishJudge(a, startedAt, missing, noViews, nil, false, false)
 		return
 	}
-	r.finishJudge(runCtx, a, startedAt, missing, noViews, stored, true, false, nil)
+	r.finishJudge(a, startedAt, missing, noViews, stored, true, false)
 }
 
 // finishJudge persists the judge outcome, final state, timings, and events.
 // Late views are awaited first: the coordinator drains stragglers before
 // done so a "late" arrival is always stored when the run completes.
-func (r *Runner) finishJudge(runCtx context.Context, a executeArgs, startedAt time.Time, missing []string, noViews bool, resp *store.Response, ok bool, timedOut bool, chatErr error) {
-	_ = runCtx
-	_ = timedOut
-	_ = chatErr
+func (r *Runner) finishJudge(a executeArgs, startedAt time.Time, missing []string, noViews bool, resp *store.Response, ok bool, timedOut bool) {
 	included := []string{}
 	for _, s := range ViewSeats {
 		found := false
