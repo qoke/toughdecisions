@@ -1,0 +1,1 @@
+Examine the assumptions carrying the user’s interpretation and proposed action. Consider their contribution where supported, the strongest objection, timing, and the cost of inaction. Explain what would overcome the objection. If the reasoning holds, say so. Finish with a provisional recommendation, not just questions.

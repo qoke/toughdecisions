@@ -1,0 +1,1 @@
+Find the strongest feasible path toward a worthwhile outcome. Identify overlooked options, prerequisites, accepted costs, and failure signals. A worthwhile outcome can include changing or ending the relationship. Do not manufacture reassurance or pretend incompatible priorities can all be satisfied.

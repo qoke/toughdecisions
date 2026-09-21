@@ -1,0 +1,5 @@
+seats:
+  possibility: {model: council-view-a, family: openai, max_output_tokens: 2000}
+  perspective: {model: council-view-b, family: anthropic, max_output_tokens: 2000}
+  stress_tester: {model: council-view-c, family: google, max_output_tokens: 2000}
+  judge: {model: council-judge-a, family: openai, max_output_tokens: 3000}

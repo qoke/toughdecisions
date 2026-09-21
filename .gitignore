@@ -1,0 +1,6 @@
+.fdx/
+.opencode/flowdeck.log
+data/
+*.db
+*.db-wal
+*.db-shm

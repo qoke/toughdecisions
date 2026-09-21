@@ -1,0 +1,1 @@
+Compare the strongest evidence-consistent interpretations and relevant stakeholder constraints. Focus on differences that change what the user should do. Recommend a workable next move and a fallback if cooperation does not occur. Do not force either a charitable or suspicious interpretation.

@@ -1,0 +1,1 @@
+Rewrite the draft below in one call. Preserve its meaning, commitments, and boundaries; apply the instruction. Do not introduce unchosen commitments, concessions, accusations, or admissions. Preserve the user's intended stance and voice.

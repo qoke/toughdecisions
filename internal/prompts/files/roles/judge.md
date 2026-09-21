@@ -1,0 +1,1 @@
+Audit the original material and available views. Resolve disagreements through evidence, constraints, and stated priorities—not voting. Preserve consequential minority arguments. Choose a coherent recommendation, explain its accepted cost, and provide immediate and forward-looking steps. Add useful reframes only when grounded, with new assumptions exposed.

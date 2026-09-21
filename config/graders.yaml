@@ -1,0 +1,21 @@
+graders:
+  - key: grader-a
+    model: council-judge-a
+    family: openai
+    role: selection
+    max_output_tokens: 2000
+  - key: grader-b
+    model: council-view-b
+    family: anthropic
+    role: selection
+    max_output_tokens: 2000
+  - key: grader-screen
+    model: council-view-a
+    family: openai
+    role: screening
+    max_output_tokens: 2000
+  - key: grader-sub
+    model: council-view-c
+    family: google
+    role: substitute
+    max_output_tokens: 2000

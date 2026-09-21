@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relationship Council</title>
+<style>
+:root{--red:#b00020;--ink:#1a1a1a;--mut:#666;--line:#ddd;--bg:#fafafa;--card:#fff}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:0 0 4rem}
+header{background:#111;color:#fff;padding:.8rem 1rem}
+header h1{font-size:1.1rem;margin:0}
+main{max-width:1000px;margin:0 auto;padding:1rem}
+section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:1rem;margin:.75rem 0}
+h2{font-size:1rem;margin:.2rem 0 .8rem}
+label{display:block;font-size:.8rem;color:var(--mut);margin:.5rem 0 .2rem}
+textarea,input[type=text]{width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:6px}
+textarea{min-height:3.2rem;resize:vertical}
+button{font:inherit;padding:.5rem .9rem;border-radius:6px;border:1px solid #999;background:#f0f0f0;cursor:pointer;margin:.25rem .25rem .25rem 0}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:#111;color:#fff;border-color:#111}
+#danger-banner{display:none;background:var(--red);color:#fff;font-weight:700;padding:.8rem 1rem;border-radius:8px;margin:.75rem 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.75rem}
+.role-card{border:1px solid var(--line);border-radius:8px;padding:.75rem;background:#fff}
+.badge{display:inline-block;font-size:.75rem;background:#eee;border:1px solid var(--line);border-radius:999px;padding:.15rem .6rem;margin-bottom:.5rem}
+.spinner{border:3px solid #eee;border-top:3px solid #111;border-radius:50%;width:22px;height:22px;animation:spin 1s linear infinite;margin:.5rem 0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.qual{background:#fffbe6;border-left:4px solid #b58900;padding:.5rem;margin:.5rem 0;white-space:pre-wrap}
+.draft{white-space:pre-wrap;border:1px solid var(--line);border-radius:6px;padding:.5rem;background:#fcfcfc;min-height:3rem}
+.muted{color:var(--mut);font-size:.85rem}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+#status{font-size:.85rem;color:var(--mut)}
+pre#timings{background:#f4f4f4;padding:.5rem;border-radius:6px;white-space:pre-wrap}
+.judge-sec{margin:.4rem 0}
+.judge-sec h3{font-size:.85rem;margin:.5rem 0 .2rem;color:#333}
+.judge-sec div{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header><h1>Relationship Council</h1></header>
+<main>
+<div id="danger-banner" role="alert"></div>
+<div id="status" aria-live="polite"></div>
+
+<section aria-label="Threads and card">
+<h2>Thread &amp; case card</h2>
+<div class="row">
+<select id="thread-picker" aria-label="Thread picker"></select>
+<input type="text" id="new-thread-name" placeholder="New thread name" style="max-width:220px">
+<button id="create-thread">Create thread</button>
+<button id="refresh-threads">Refresh</button>
+</div>
+<label for="card-decision">decision</label><textarea id="card-decision"></textarea>
+<label for="card-context">context</label><textarea id="card-context"></textarea>
+<label for="card-priorities">priorities</label><textarea id="card-priorities"></textarea>
+<label for="card-unusual">unusual</label><textarea id="card-unusual"></textarea>
+<label for="card-history">history</label><textarea id="card-history"></textarea>
+<label for="card-deadline">deadline</label><textarea id="card-deadline"></textarea>
+<label for="card-style">style</label><textarea id="card-style"></textarea>
+<div class="row"><button id="save-card" class="primary">Save card</button><span id="card-status" class="muted"></span></div>
+</section>
+
+<section aria-label="Ask council">
+<h2>Ask council</h2>
+<label for="messages">messages (one per line, <code>sender: text</code>)</label>
+<textarea id="messages" rows="5" placeholder="them: hello&#10;me: hi"></textarea>
+<label for="question">question</label><input type="text" id="question">
+<label for="style">style</label><input type="text" id="style">
+<div class="row"><button id="ask" class="primary">Ask council</button><span id="ask-status" class="muted"></span></div>
+<div class="muted">Open request: <span id="open-request">none</span> <a id="deeplink" href="#">deep link</a></div>
+<pre id="timings" hidden></pre>
+</section>
+
+<section aria-label="Views">
+<h2>Independent views</h2>
+<div class="cards">
+<div class="role-card" id="card-possibility">
+<span class="badge">Independent view — not yet synthesized</span>
+<h2>possibility</h2>
+<div class="spinner" data-spinner></div>
+<div class="view-body"></div>
+<div class="row"><button data-copy disabled>Copy draft</button></div>
+</div>
+<div class="role-card" id="card-perspective">
+<span class="badge">Independent view — not yet synthesized</span>
+<h2>perspective</h2>
+<div class="spinner" data-spinner></div>
+<div class="view-body"></div>
+<div class="row"><button data-copy disabled>Copy draft</button></div>
+</div>
+<div class="role-card" id="card-stress_tester">
+<span class="badge">Independent view — not yet synthesized</span>
+<h2>stress_tester</h2>
+<div class="spinner" data-spinner></div>
+<div class="view-body"></div>
+<div class="row"><button data-copy disabled>Copy draft</button></div>
+</div>
+</div>
+</section>
+
+<section aria-label="Judge">
+<h2>Judge</h2>
+<div id="judge-body"><p class="muted">No judge output yet.</p></div>
+</section>
+
+<section aria-label="Rewrite">
+<h2>Rewrite selected draft</h2>
+<div class="row">
+<select id="rewrite-source" aria-label="Rewrite source">
+<option value="judge">judge</option>
+<option value="view:possibility">view:possibility</option>
+<option value="view:perspective">view:perspective</option>
+<option value="view:stress_tester">view:stress_tester</option>
+</select>
+<button data-rewrite="Make it shorter, preserving meaning, commitments, and boundaries.">shorter</button>
+<button data-rewrite="Make it warmer, preserving meaning, commitments, and boundaries.">warmer</button>
+<button data-rewrite="Make it more direct, preserving meaning, commitments, and boundaries.">more direct</button>
+</div>
+<label for="custom-instruction">custom instruction</label>
+<textarea id="custom-instruction" placeholder="Custom rewrite instruction"></textarea>
+<div class="row"><button id="rewrite-custom">Rewrite with custom instruction</button></div>
+<div id="rewrite-output" class="draft" aria-live="polite"></div>
+</section>
+
+<section aria-label="Sent">
+<h2>Mark as sent</h2>
+<label for="sent-text">sent text</label>
+<textarea id="sent-text" rows="4"></textarea>
+<div class="row"><button id="mark-sent">Mark as sent</button><span id="sent-status" class="muted"></span></div>
+</section>
+
+<section aria-label="Feedback">
+<h2>Feedback</h2>
+<div class="row" id="feedback-buttons">
+<button data-tag="missed_constraint">missed_constraint</button>
+<button data-tag="invented_motive">invented_motive</button>
+<button data-tag="wrong_tone">wrong_tone</button>
+<button data-tag="unhelpful_repetition">unhelpful_repetition</button>
+<button data-tag="too_slow">too_slow</button>
+<button data-tag="other">other</button>
+</div>
+<label for="feedback-note">note (optional)</label><input type="text" id="feedback-note">
+<div id="feedback-status" class="muted"></div>
+</section>
+</main>
+<script>
+(function(){
+"use strict";
+var state={threadId:null,requestId:null,es:null,views:{},judge:null,danger:false};
+var ROLES=["possibility","perspective","stress_tester"];
+function $(id){return document.getElementById(id);}
+function setStatus(t){$("status").textContent=t||"";}
+function esc(s){return String(s==null?"":s);}
+function showDanger(text){var b=$("danger-banner");b.style.display="block";b.textContent=text;}
+function hideDanger(){var b=$("danger-banner");b.style.display="none";b.textContent="";}
+hideDanger();
+
+function api(path,opts){
+  opts=opts||{};
+  opts.headers=Object.assign({"Content-Type":"application/json"},opts.headers||{});
+  return fetch(path,opts).then(function(r){
+    if(!r.ok)return r.text().then(function(t){throw new Error(r.status+" "+t);});
+    var ct=r.headers.get("content-type")||"";
+    if(r.status===201||r.status===204&&!ct)return {};
+    if(ct.indexOf("json")>=0)return r.json();
+    return r.text().then(function(t){try{return JSON.parse(t);}catch(e){return {};}});
+  });
+}
+
+function loadThreads(selectedId){
+  return api("/api/threads").then(function(d){
+    var list=d.threads||d||[];
+    var sel=$("thread-picker");sel.innerHTML="";
+    list.forEach(function(t){
+      var o=document.createElement("option");o.value=t.id;t.name=t.name||t.id;o.textContent=t.name||t.id;sel.appendChild(o);
+    });
+    if(selectedId)sel.value=selectedId;
+    state.threadId=sel.value||selectedId||null;
+    if(state.threadId)loadThread(state.threadId);
+  }).catch(function(e){setStatus("threads load failed: "+e.message);});
+}
+function loadThread(id){
+  state.threadId=id;
+  api("/api/threads/"+encodeURIComponent(id)).then(function(d){
+    var card=d.card||d.latest_card||{};
+    ["decision","context","priorities","unusual","history","deadline","style"].forEach(function(f){
+      $("card-"+f).value=card[f]||"";
+    });
+    $("card-status").textContent="card loaded (thread "+id+")";
+  }).catch(function(e){$("card-status").textContent="card load failed: "+e.message;});
+}
+$("thread-picker").addEventListener("change",function(e){loadThread(e.target.value);});
+$("refresh-threads").addEventListener("click",function(){loadThreads(state.threadId);});
+$("create-thread").addEventListener("click",function(){
+  var name=$("new-thread-name").value.trim();if(!name)return;
+  api("/api/threads",{method:"POST",body:JSON.stringify({name:name})}).then(function(d){
+    var id=d.id||d.thread_id||(d.thread&&d.thread.id);
+    loadThreads(id);
+  }).catch(function(e){setStatus("create thread failed: "+e.message);});
+});
+$("save-card").addEventListener("click",function(){
+  if(!state.threadId){$("card-status").textContent="pick a thread first";return;}
+  var card={};
+  ["decision","context","priorities","unusual","history","deadline","style"].forEach(function(f){card[f]=$("card-"+f).value;});
+  api("/api/threads/"+encodeURIComponent(state.threadId)+"/card",{method:"PUT",body:JSON.stringify(card)})
+    .then(function(){$("card-status").textContent="card saved";})
+    .catch(function(e){$("card-status").textContent="save failed: "+e.message;});
+});
+
+function parseMessages(){
+  var lines=$("messages").value.split("\n"),out=[];
+  lines.forEach(function(ln){
+    ln=ln.trim();if(!ln)return;
+    var i=ln.indexOf(":");
+    if(i>0)out.push({sender:ln.slice(0,i).trim(),text:ln.slice(i+1).trim()});
+    else out.push({sender:"them",text:ln});
+  });
+  return out;
+}
+
+$("ask").addEventListener("click",function(){
+  if(!state.threadId){$("ask-status").textContent="pick a thread first";return;}
+  var body={thread_id:state.threadId,messages:parseMessages(),question:$("question").value,style:$("style").value};
+  if(state.requestId)body.supersedes_request_id=state.requestId;
+  $("ask-status").textContent="asking…";
+  api("/api/requests",{method:"POST",body:JSON.stringify(body)}).then(function(d){
+    var id=d.request_id||d.id;
+    $("ask-status").textContent="request "+id;
+    openRequest(id);
+  }).catch(function(e){$("ask-status").textContent="ask failed: "+e.message;});
+});
+
+function cardEl(role){return $("card-"+role);}
+function renderView(role,v){
+  var el=cardEl(role),body=el.querySelector(".view-body"),spin=el.querySelector("[data-spinner]"),copy=el.querySelector("[data-copy]");
+  var st=v&&(v.state||v.status)||"pending";
+  if(st==="complete"){if(spin)spin.style.display="none";}
+  if(st==="complete"){
+    var p=v.parsed||v.view||{};
+    var qual=p.qualification||v.qualification||"";
+    var draft=p.suggested_reply||p.suggested_draft||p.recommended_move||p.recommended_move_or_reply||v.draft||v.raw||v.raw_text||"";
+    var extra=["decisive_insight","tradeoff_or_objection","depends_on","fallback","recommended_move","suggested_reply"]
+      .filter(function(k){return p[k]&&k!=="qualification";})
+      .map(function(k){return k+": "+p[k];}).join("\n\n");
+    var danger=v.urgent_danger&&v.urgent_danger.present;
+    if(p.urgent_danger&&p.urgent_danger.present)danger=true;
+    body.innerHTML="";
+    var q=document.createElement("div");q.className="qual";q.textContent=qual||"(no qualification)";body.appendChild(q);
+    var d=document.createElement("div");d.className="draft";d.textContent=draft||extra||v.raw||"(empty)";body.appendChild(d);
+    if(extra&&draft){var x=document.createElement("div");x.className="muted";x.style.whiteSpace="pre-wrap";x.textContent=extra;body.appendChild(x);}
+    if(danger){var dg=v.urgent_danger||p.urgent_danger||{};showDanger("Urgent danger flagged by "+role+": "+(dg.caution||"see view caution"));}
+    copy.disabled=false;
+    copy.onclick=function(){navigator.clipboard&&navigator.clipboard.writeText(d.textContent);};
+    if(v.late||st==="late")showLate(role);
+  } else if(st==="failed"||st==="timed_out"||st==="error"){
+    if(spin)spin.style.display="none";
+    body.innerHTML="<p class='muted'>missing: "+esc(role)+"</p>";
+    copy.disabled=true;
+  } else if(st==="late"){
+    showLate(role);
+  } else {
+    body.innerHTML="<p class='muted'>waiting…</p>";
+  }
+}
+function showLate(role){
+  var el=cardEl(role),body=el.querySelector(".view-body"),spin=el.querySelector("[data-spinner]");
+  if(spin)spin.style.display="none";
+  var p=document.createElement("p");p.className="muted";p.textContent="arrived after synthesis — not included";
+  body.appendChild(p);
+}
+function resetViews(){
+  state.views={};
+  ROLES.forEach(function(r){
+    var el=cardEl(r);
+    var s=el.querySelector("[data-spinner]");if(s)s.style.display="block";
+    el.querySelector(".view-body").innerHTML="<p class='muted'>waiting…</p>";
+    el.querySelector("[data-copy]").disabled=true;
+  });
+  $("judge-body").innerHTML="<p class='muted'>No judge output yet.</p>";
+  hideDanger();$("timings").hidden=true;$("timings").textContent="";
+}
+function renderJudge(j){
+  var box=$("judge-body");
+  if(!j){box.innerHTML="<p class='muted'>No judge output yet.</p>";return;}
+  var st=j.state||j.status||"complete";
+  if(st==="failed"||st==="timed_out"||st==="error"){box.textContent="Judge did not complete; views remain available.";return;}
+  var p=j.parsed||j.judge||j;
+  if(p.urgent_danger&&p.urgent_danger.present)showDanger("Urgent danger flagged by judge: "+(p.urgent_danger.caution||"see judge caution"));
+  function sec(title,val){
+    var d=document.createElement("div");d.className="judge-sec";
+    var h=document.createElement("h3");h.textContent=title;d.appendChild(h);
+    var c=document.createElement("div");c.textContent=val||"—";d.appendChild(c);return d;
+  }
+  box.innerHTML="";
+  box.appendChild(sec("Recommended reply/action",(p.recommended_reply||"")+"\n"+(p.recommended_action||"")));
+  box.appendChild(sec("Why",p.why));
+  box.appendChild(sec("Accepted cost",p.accepted_cost));
+  var nx=p.next||{};
+  box.appendChild(sec("Next","immediate: "+(nx.immediate||"")+"\nforward: "+(nx.forward||"")));
+  box.appendChild(sec("Change course if",p.change_course_if));
+  box.appendChild(sec("Unresolved disagreement",p.unresolved_disagreement));
+  var miss=p.missing_roles||j.missing_seats||j.missing||[];
+  if(miss&&miss.length){var m=document.createElement("p");m.className="muted";m.textContent="missing: "+miss.join(", ");box.appendChild(m);}
+  var raw=j.raw||j.raw_text||p.raw;
+  if(raw&&!p.recommended_reply){var r=document.createElement("div");r.className="draft";r.textContent=raw;box.appendChild(r);}
+  // prefill sent box + rewrite source
+  var txt=(p.recommended_reply||"")||raw||"";
+  if(txt&&!$("sent-text").value)$("sent-text").value=txt;
+}
+function renderTimings(s){
+  var a=s.t_first_usable_view_ms!=null?s.t_first_usable_view_ms:(s.timing||{}).t_first_usable_view_ms;
+  var b=s.t_final_ms!=null?s.t_final_ms:(s.timing||{}).t_final_ms;
+  if(a!=null||b!=null){var t=$("timings");t.hidden=false;t.textContent="t_first_usable_view_ms: "+a+"\nt_final_ms: "+b;}
+}
+function applySnapshot(s){
+  if(!s)return;
+  var views=s.views||{};
+  Object.keys(views).forEach(function(k){state.views[k]=views[k];renderView(k,views[k]);});
+  ROLES.forEach(function(r){if(!views[r])renderView(r,{state:"pending"});});
+  renderJudge(s.judge);
+  renderTimings(s);
+  var dangerFlag=s.danger_flagged||s.danger||((s.judge||{}).urgent_danger||{}).present;
+  if(dangerFlag&&!$("danger-banner").textContent)showDanger("Urgent danger flagged — review cautions before acting.");
+  if(s.timings)renderTimings(s.timings);
+}
+function handleEvent(ev){
+  var d;try{d=JSON.parse(ev.data);}catch(e){return;}
+  var t=d.type||d.event||"";
+  var p=d.payload||d.data||d||{};
+  if(t==="snapshot"){applySnapshot(p.snapshot||p.state||p);return;}
+  if(t==="view_complete"){var seat=p.seat||p.role;state.views[seat]=Object.assign({state:"complete"},p.view||p);renderView(seat,state.views[seat]);renderTimings(p);return;}
+  if(t==="view_failed"){var s2=p.seat||p.role;renderView(s2,{state:"failed"});return;}
+  if(t==="view_late"){var s3=p.seat||p.role;var cur=state.views[s3]||{};cur.state="complete";cur.late=true;if(p.view)cur=Object.assign(cur,p.view,{state:"complete",late:true});state.views[s3]=cur;renderView(s3,cur);showLate(s3);return;}
+  if(t==="danger"){showDanger("Urgent danger: "+(p.caution||p.text||JSON.stringify(p)));return;}
+  if(t==="judge_started"){$("judge-body").innerHTML="<p class='muted'>Judge running…</p>";return;}
+  if(t==="judge_complete"){renderJudge(p.judge||p);renderTimings(p);return;}
+  if(t==="judge_failed"){$("judge-body").textContent="Judge did not complete; views remain available.";return;}
+  if(t==="superseded"){setStatus("request superseded by "+(p.superseded_by||p.superseded_by_request_id||"newer request"));return;}
+  if(t==="done"){renderTimings(p);setStatus("done");if(state.es){state.es.close();}return;}
+}
+function openRequest(id){
+  state.requestId=id;
+  $("open-request").textContent=id;
+  var u=new URL(location.href);u.searchParams.set("request",id);$("deeplink").href=u.toString();
+  history.replaceState(null,"","?request="+encodeURIComponent(id));
+  resetViews();
+  api("/api/requests/"+encodeURIComponent(id)).then(applySnapshot).catch(function(e){setStatus("load request failed: "+e.message);});
+  if(state.es)state.es.close();
+  var es=new EventSource("/api/requests/"+encodeURIComponent(id)+"/events");
+  state.es=es;
+  ["snapshot","view_complete","view_failed","view_late","danger","judge_started","judge_complete","judge_failed","superseded","done","message"].forEach(function(t){
+    es.addEventListener(t,handleEvent);
+  });
+  es.onmessage=handleEvent;
+  es.onerror=function(){setStatus("SSE reconnecting…");};
+}
+
+// rewrite
+document.querySelectorAll("[data-rewrite]").forEach(function(b){
+  b.addEventListener("click",function(){doRewrite(b.getAttribute("data-rewrite"));});
+});
+$("rewrite-custom").addEventListener("click",function(){
+  var i=$("custom-instruction").value.trim();if(!i)return;doRewrite(i);
+});
+function doRewrite(instruction){
+  if(!state.requestId){setStatus("open a request first");return;}
+  $("rewrite-output").textContent="rewriting…";
+  api("/api/requests/"+encodeURIComponent(state.requestId)+"/rewrite",
+    {method:"POST",body:JSON.stringify({source_ref:$("rewrite-source").value,instruction:instruction})})
+    .then(function(d){$("rewrite-output").textContent=d.text||d.rewrite||"";})
+    .catch(function(e){$("rewrite-output").textContent="rewrite failed: "+e.message;});
+}
+// sent
+$("mark-sent").addEventListener("click",function(){
+  if(!state.requestId){$("sent-status").textContent="open a request first";return;}
+  api("/api/requests/"+encodeURIComponent(state.requestId)+"/sent",
+    {method:"POST",body:JSON.stringify({text:$("sent-text").value,source_ref:$("rewrite-source").value})})
+    .then(function(){$("sent-status").textContent="recorded (201)";})
+    .catch(function(e){$("sent-status").textContent="failed: "+e.message;});
+});
+// feedback
+document.querySelectorAll("#feedback-buttons [data-tag]").forEach(function(b){
+  b.addEventListener("click",function(){
+    if(!state.requestId){$("feedback-status").textContent="open a request first";return;}
+    api("/api/requests/"+encodeURIComponent(state.requestId)+"/feedback",
+      {method:"POST",body:JSON.stringify({tag:b.getAttribute("data-tag"),note:$("feedback-note").value||undefined})})
+      .then(function(){$("feedback-status").textContent="feedback saved: "+b.getAttribute("data-tag");})
+      .catch(function(e){$("feedback-status").textContent="failed: "+e.message;});
+  });
+});
+
+loadThreads(null).then(function(){
+  var m=new URLSearchParams(location.search).get("request");
+  if(m)openRequest(m);
+});
+})();
+</script>
+</body>
+</html>
