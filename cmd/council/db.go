@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/qoke/toughdecisions/internal/config"
 	"github.com/qoke/toughdecisions/internal/store"
@@ -52,14 +53,34 @@ func dbMigrate([]string) int {
 
 func dbPrune(args []string) int {
 	fs := flag.NewFlagSet("db prune", flag.ContinueOnError)
-	olderThan := fs.Int("older-than", 0, "prune production rows older than N days")
+	olderThan := fs.Int("older-than", 0, "prune production rows older than N days (default: retention_production_days)")
 	if err := fs.Parse(args); err != nil {
 		return exitValidation
 	}
-	if *olderThan <= 0 {
+	if *olderThan < 0 {
+		fmt.Fprintf(os.Stderr, "db prune: --older-than <days> must be >= 0\n")
+		return exitValidation
+	}
+	db, cfg, err := openStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "db prune: %v\n", err)
+		return exitError
+	}
+	defer db.Close()
+	days := *olderThan
+	if days == 0 {
+		days = cfg.RetentionProductionDays()
+	}
+	if days <= 0 {
 		fmt.Fprintf(os.Stderr, "db prune: --older-than <days> must be > 0\n")
 		return exitValidation
 	}
-	fmt.Fprintf(os.Stderr, "db prune: not implemented until Phase 6\n")
-	return exitError
+	res, err := db.PruneProduction(time.Now().AddDate(0, 0, -days))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "db prune: %v\n", err)
+		return exitError
+	}
+	fmt.Printf("db prune: ok (older-than=%d requests=%d views=%d judge=%d rewrites=%d sent=%d responses=%d)\n",
+		days, res.Requests, res.RequestViews, res.RequestJudge, res.Rewrites, res.SentMessages, res.Responses)
+	return exitOK
 }

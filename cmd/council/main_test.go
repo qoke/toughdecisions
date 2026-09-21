@@ -23,20 +23,6 @@ func TestMissingSubcommandExit2(t *testing.T) {
 	}
 }
 
-func TestPhaseStubsExit1(t *testing.T) {
-	for _, args := range [][]string{
-		{"harness", "weekly"},
-		{"cases", "validate"},
-		{"graders", "status"},
-		{"flags", "list"},
-		{"db", "prune", "--older-than", "7"},
-	} {
-		if got := run(args); got != exitError {
-			t.Fatalf("%v = %d, want %d", args, got, exitError)
-		}
-	}
-}
-
 func TestHelpExit0(t *testing.T) {
 	if got := run([]string{"help"}); got != exitOK {
 		t.Fatalf("help = %d, want %d", got, exitOK)
@@ -49,18 +35,18 @@ func TestDispatchUnknownExit2(t *testing.T) {
 	}
 }
 
-func TestPackPublishBlockedExit3(t *testing.T) {
-	if got := run([]string{"pack", "publish"}); got != exitBlocked {
-		t.Fatalf("publish = %d, want %d", got, exitBlocked)
+func TestPackPublishValidationExit2(t *testing.T) {
+	if got := run([]string{"pack", "publish", "--bogus"}); got != exitValidation {
+		t.Fatalf("publish bogus = %d, want %d", got, exitValidation)
 	}
 }
 
 func TestDbPruneValidation(t *testing.T) {
-	if got := run([]string{"db", "prune"}); got != exitValidation {
-		t.Fatalf("prune no flag = %d, want %d", got, exitValidation)
-	}
-	if got := dbPrune([]string{"--older-than", "0"}); got != exitValidation {
+	if got := dbPrune([]string{"--older-than", "-1"}); got != exitValidation {
 		t.Fatalf("prune zero = %d, want %d", got, exitValidation)
+	}
+	if got := dbPrune([]string{"--bogus"}); got != exitValidation {
+		t.Fatalf("prune bogus = %d, want %d", got, exitValidation)
 	}
 }
 

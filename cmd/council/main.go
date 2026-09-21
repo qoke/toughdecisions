@@ -44,28 +44,28 @@ func run(args []string) int {
 		})
 	case "cases":
 		return dispatch(args[0], args[1:], map[string]handler{
-			"validate": phaseStub("cases validate", 3),
-			"load":     phaseStub("cases load", 3),
+			"validate": casesValidate,
+			"load":     casesLoad,
 		})
 	case "graders":
 		return dispatch(args[0], args[1:], map[string]handler{
-			"calibrate": phaseStub("graders calibrate", 4),
-			"status":    phaseStub("graders status", 4),
+			"calibrate": gradersCalibrate,
+			"status":    gradersStatus,
 		})
 	case "harness":
 		return dispatch(args[0], args[1:], map[string]handler{
-			"weekly":     phaseStub("harness weekly", 5),
-			"sentinel":   phaseStub("harness sentinel", 5),
-			"screen":     phaseStub("harness screen", 5),
-			"compare":    phaseStub("harness compare", 5),
-			"downstream": phaseStub("harness downstream", 5),
-			"report":     phaseStub("harness report", 5),
+			"weekly":     harnessWeekly,
+			"sentinel":   harnessSentinel,
+			"screen":     harnessScreen,
+			"compare":    harnessCompare,
+			"downstream": harnessDownstream,
+			"report":     harnessReport,
 		})
 	case "flags":
 		return dispatch(args[0], args[1:], map[string]handler{
-			"list":    phaseStub("flags list", 4),
-			"confirm": phaseStub("flags confirm", 4),
-			"dismiss": phaseStub("flags dismiss", 4),
+			"list":    flagsList,
+			"confirm": flagsConfirm,
+			"dismiss": flagsDismiss,
 		})
 	case "feedback":
 		return dispatch(args[0], args[1:], map[string]handler{
