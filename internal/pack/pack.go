@@ -6,6 +6,7 @@
 package pack
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -40,6 +41,35 @@ type seatYAML struct {
 	RolePromptFile     string   `yaml:"role_prompt_file"`
 }
 
+// ResolveRolePromptFile validates ref against traversal/absolute paths and
+// returns the resolved path inside the declaring YAML file's directory.
+// dir is the directory of the declaring YAML file (e.g. filepath.Dir(seats
+// file)). Absolute refs and refs escaping dir are hard errors.
+func ResolveRolePromptFile(dir, ref string) (string, error) {
+	if ref == "" {
+		return "", fmt.Errorf("pack: role_prompt_file is empty")
+	}
+	if filepath.IsAbs(ref) {
+		return "", fmt.Errorf("pack: role_prompt_file %q must be a relative path inside the seats directory", ref)
+	}
+	base, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("pack: resolve base dir: %w", err)
+	}
+	candidate := filepath.Clean(filepath.Join(base, ref))
+	if candidate != base && !strings.HasPrefix(candidate, base+string(os.PathSeparator)) {
+		return "", fmt.Errorf("pack: role_prompt_file %q escapes the seats directory", ref)
+	}
+	return candidate, nil
+}
+
+// decodeStrict unmarshals YAML while rejecting unknown/misspelled fields.
+func decodeStrict(raw []byte, v any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	return dec.Decode(v)
+}
+
 // resolveRolePromptOverride returns the inline override, or the content of
 // role_prompt_file (resolved relative to the seats file) when set. Setting
 // both is an error; a missing file is a hard error, never silently ignored.
@@ -50,9 +80,9 @@ func resolveRolePromptOverride(seat, seatsFile string, sc seatYAML) (string, err
 	if sc.RolePromptFile == "" {
 		return sc.RolePromptOverride, nil
 	}
-	path := sc.RolePromptFile
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(filepath.Dir(seatsFile), path)
+	path, err := ResolveRolePromptFile(filepath.Dir(seatsFile), sc.RolePromptFile)
+	if err != nil {
+		return "", fmt.Errorf("pack: seat %q %w", seat, err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -73,7 +103,7 @@ func loadSeats(file string) (map[Seat]SeatConfig, error) {
 		return nil, fmt.Errorf("pack: read seats file: %w", err)
 	}
 	var sf seatsFile
-	if err := yaml.Unmarshal(raw, &sf); err != nil {
+	if err := decodeStrict(raw, &sf); err != nil {
 		return nil, fmt.Errorf("pack: parse seats file: %w", err)
 	}
 	if len(sf.Seats) == 0 {
