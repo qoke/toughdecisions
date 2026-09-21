@@ -44,6 +44,18 @@ var contractJudgeMD string
 //go:embed files/rewrite.md
 var rewriteMD string
 
+//go:embed files/graders/absolute.md
+var graderAbsoluteMD string
+
+//go:embed files/graders/pairwise.md
+var graderPairwiseMD string
+
+//go:embed files/graders/coverage.md
+var graderCoverageMD string
+
+//go:embed files/graders/calibration.md
+var graderCalibrationMD string
+
 //go:embed files
 var promptFiles embed.FS
 
@@ -86,9 +98,29 @@ func renderContext(in schema.CaseInput) string {
 	return b.String()
 }
 
+// resolveRole returns the embedded role prompt, or the override when set.
+// An unknown role is always an error, even when an override is supplied, so
+// callers cannot silently address a seat that does not exist.
+func resolveRole(role, override string) (string, error) {
+	embedded, err := roleFile(role)
+	if err != nil {
+		return "", err
+	}
+	if override != "" {
+		return override, nil
+	}
+	return embedded, nil
+}
+
 // viewSystem builds the system message for a view seat.
 func viewSystem(role string) (string, error) {
-	rolePrompt, err := roleFile(role)
+	return viewSystemWithOverride(role, "")
+}
+
+// viewSystemWithOverride builds the view system message, replacing the
+// embedded role prompt when override is non-empty.
+func viewSystemWithOverride(role, override string) (string, error) {
+	rolePrompt, err := resolveRole(role, override)
 	if err != nil {
 		return "", err
 	}
@@ -98,7 +130,14 @@ func viewSystem(role string) (string, error) {
 // BuildView assembles the [system, user] messages for one independent view.
 // role is a plain role name ("possibility", "perspective", "stress_tester").
 func BuildView(role string, in schema.CaseInput) ([]gateway.Message, error) {
-	sys, err := viewSystem(role)
+	return BuildViewWithOverride(role, "", in)
+}
+
+// BuildViewWithOverride is BuildView with a role-prompt override: a
+// non-empty override replaces the embedded role prompt for that seat.
+// An empty override uses the embedded file unchanged.
+func BuildViewWithOverride(role, override string, in schema.CaseInput) ([]gateway.Message, error) {
+	sys, err := viewSystemWithOverride(role, override)
 	if err != nil {
 		return nil, err
 	}
@@ -127,10 +166,26 @@ func renderJudgeView(role string, v schema.RenderedView) string {
 // noViewsNotice is used when no independent views are available.
 const noViewsNotice = "No independent views are available. Answer directly from the original material, clearly labeled as lacking independent views."
 
+// judgeSystem builds the judge system message with an optional role-prompt
+// override. An empty override uses the embedded judge role file unchanged.
+func judgeSystem(override string) string {
+	rolePrompt := roleJudgeMD
+	if override != "" {
+		rolePrompt = override
+	}
+	return sharedInstructionsMD + "\n\n" + rolePrompt + "\n\n" + contractJudgeMD
+}
+
 // BuildJudge assembles the [system, user] messages for the synthesis judge.
 // views is keyed by role name only; model ids must never appear.
 func BuildJudge(in schema.CaseInput, views map[string]schema.RenderedView, missing []string, noViews bool) ([]gateway.Message, error) {
-	sys := sharedInstructionsMD + "\n\n" + roleJudgeMD + "\n\n" + contractJudgeMD
+	return BuildJudgeWithOverride(in, views, missing, noViews, "")
+}
+
+// BuildJudgeWithOverride is BuildJudge with a role-prompt override: a
+// non-empty override replaces the embedded judge role prompt.
+func BuildJudgeWithOverride(in schema.CaseInput, views map[string]schema.RenderedView, missing []string, noViews bool, override string) ([]gateway.Message, error) {
+	sys := judgeSystem(override)
 	var b strings.Builder
 	b.WriteString(renderContext(in))
 	if len(views) > 0 {
@@ -153,6 +208,95 @@ func BuildJudge(in schema.CaseInput, views map[string]schema.RenderedView, missi
 	return []gateway.Message{
 		{Role: "system", Content: sys},
 		{Role: "user", Content: b.String()},
+	}, nil
+}
+
+// graderSystem builds the system message for a grader: shared instructions
+// plus the selected grader rubric. The role name labels the response under
+// review; model names never appear in any prompt.
+func graderSystem(role, rubric string) (string, error) {
+	if _, err := roleFile(role); err != nil {
+		return "", err
+	}
+	return sharedInstructionsMD + "\n\n" + rubric, nil
+}
+
+// gradeAcceptanceBlock renders the acceptance notes as constraints.
+func gradeAcceptanceBlock(acceptance string) string {
+	if strings.TrimSpace(acceptance) == "" {
+		return ""
+	}
+	return "\n\nAcceptance notes (constraints, not a prescribed answer):\n" + acceptance
+}
+
+// BuildAbsoluteGrade assembles the [system, user] messages for the absolute
+// (0-4) rubric grader over one rendered response.
+func BuildAbsoluteGrade(in schema.CaseInput, acceptance, role, rendered string) ([]gateway.Message, error) {
+	sys, err := graderSystem(role, graderAbsoluteMD)
+	if err != nil {
+		return nil, err
+	}
+	user := renderContext(in) + "\n\nResponse under review (role: " + role + "):\n" + rendered + gradeAcceptanceBlock(acceptance)
+	return []gateway.Message{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: user},
+	}, nil
+}
+
+// BuildPairwiseGrade assembles the [system, user] messages for the blind A/B
+// grader over two rendered responses.
+func BuildPairwiseGrade(in schema.CaseInput, acceptance, role, a, b string) ([]gateway.Message, error) {
+	sys, err := graderSystem(role, graderPairwiseMD)
+	if err != nil {
+		return nil, err
+	}
+	user := renderContext(in) + "\n\nResponse A (role: " + role + "):\n" + a + "\n\nResponse B (role: " + role + "):\n" + b + gradeAcceptanceBlock(acceptance)
+	return []gateway.Message{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: user},
+	}, nil
+}
+
+// BuildCoverageGrade assembles the [system, user] messages for the
+// issue-coverage grader. views maps role name to rendered view text.
+func BuildCoverageGrade(in schema.CaseInput, issues string, views map[string]string, judge string) ([]gateway.Message, error) {
+	sys := sharedInstructionsMD + "\n\n" + graderCoverageMD
+	var b strings.Builder
+	b.WriteString(renderContext(in))
+	if strings.TrimSpace(issues) != "" {
+		b.WriteString("\n\nIssues:\n" + issues)
+	}
+	if len(views) > 0 {
+		roles := make([]string, 0, len(views))
+		for r := range views {
+			roles = append(roles, r)
+		}
+		sort.Strings(roles)
+		b.WriteString("\n\nViews by role:\n")
+		for _, r := range roles {
+			b.WriteString("\n## " + r + "\n" + views[r])
+		}
+	}
+	if strings.TrimSpace(judge) != "" {
+		b.WriteString("\n\nJudge output:\n" + judge)
+	}
+	return []gateway.Message{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: b.String()},
+	}, nil
+}
+
+// BuildCalibrationGrade assembles the [system, user] messages for grader
+// admission: the calibration rubric over one rendered response.
+func BuildCalibrationGrade(in schema.CaseInput, acceptance, role, rendered string) ([]gateway.Message, error) {
+	sys, err := graderSystem(role, graderCalibrationMD)
+	if err != nil {
+		return nil, err
+	}
+	user := renderContext(in) + "\n\nResponse under review (role: " + role + "):\n" + rendered + gradeAcceptanceBlock(acceptance)
+	return []gateway.Message{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: user},
 	}, nil
 }
 
