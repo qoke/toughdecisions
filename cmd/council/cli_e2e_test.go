@@ -82,7 +82,7 @@ cases:
     seat: possibility
     response_text: "reference answer"
     category: grounded_support
-    human_scores: {grounding_calibration: 3, context_values_fidelity: 3, decision_insight: 3, practical_robustness: 3, role_execution: 3}
+    human_scores: {grounding_and_calibration: 3, context_and_values_fidelity: 3, decision_insight: 3, practical_robustness: 3, role_execution: 3}
     human_flags: []
     notes: ""
 `
@@ -104,7 +104,7 @@ func writeGradersFile(t *testing.T, dir string) {
 }
 
 func gradeContent(scores map[string]int) string {
-	return `{"scores":{"grounding_calibration":3,"context_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	return `{"scores":{"grounding_and_calibration":3,"context_and_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
 }
 
 func TestCasesValidateLoadTable(t *testing.T) {
@@ -343,8 +343,19 @@ func TestHarnessWeeklyReportOnlySuccess(t *testing.T) {
 	if got := run([]string{"cases", "load"}); got != exitOK {
 		t.Fatalf("cases load = %d", got)
 	}
+	viewJSON := `{"urgent_danger":{"present":false},"qualification":"q","suggested_reply":"r","decisive_insight":"i","tradeoff_or_objection":"t","depends_on":"d","fallback":"f"}`
+	judgeJSON := `{"urgent_danger":{"present":false},"qualification":"q","recommended_reply":"r","why":"w","accepted_cost":"c","next":{"immediate":"i","forward":"f"},"change_course_if":"cc"}`
+	// Baselines generate seats in per-case order (possibility,
+	// perspective, stress_tester, judge) on the shared m1 model, so
+	// interleave view/view/view/judge per case for the 2 fixture cases.
+	fake := gateway.NewFake(map[string][]gateway.Step{
+		"m1": {
+			{Content: viewJSON}, {Content: viewJSON}, {Content: viewJSON}, {Content: judgeJSON},
+			{Content: viewJSON}, {Content: viewJSON}, {Content: viewJSON}, {Content: judgeJSON},
+		},
+	})
 	old := gatewayFactory
-	gatewayFactory = func(_ *config.Config, _ logx.Logger) gateway.Client { return gateway.NewFake(nil) }
+	gatewayFactory = func(_ *config.Config, _ logx.Logger) gateway.Client { return fake }
 	defer func() { gatewayFactory = old }()
 	// Report-only weekly runs fully offline: no sentinel, no candidates.
 	if got := run([]string{"harness", "weekly", "--steps", "report"}); got != exitOK {
@@ -488,13 +499,23 @@ func TestHarnessSentinelSuccessOffline(t *testing.T) {
 	}
 	viewJSON := `{"urgent_danger":{"present":false},"qualification":"q","suggested_reply":"r","decisive_insight":"i","tradeoff_or_objection":"t","depends_on":"d","fallback":"f"}`
 	judgeJSON := `{"urgent_danger":{"present":false},"qualification":"q","recommended_reply":"r","why":"w","accepted_cost":"c","next":{"immediate":"i","forward":"f"},"change_course_if":"cc"}`
-	gradeJSON := `{"scores":{"grounding_calibration":3,"context_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	gradeJSON := `{"scores":{"grounding_and_calibration":3,"context_and_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
 	pairJSON := `{"verdict":"tie","margin":"clear","consequential_difference":"d"}`
 	views := []gateway.Step{}
+	// Baselines then sentinel each generate per-case blocks (3 views then
+	// judge) on the shared m1 model: interleave view/view/view/judge per
+	// block for the 2 fixture cases x (baselines + sentinel) runs.
+	for b := 0; b < 4; b++ {
+		views = append(views,
+			gateway.Step{Content: viewJSON},
+			gateway.Step{Content: viewJSON},
+			gateway.Step{Content: viewJSON},
+			gateway.Step{Content: judgeJSON},
+		)
+	}
 	for i := 0; i < 200; i++ {
 		views = append(views, gateway.Step{Content: viewJSON})
 	}
-	views = append(views, gateway.Step{Content: judgeJSON}, gateway.Step{Content: judgeJSON})
 	grades := []gateway.Step{}
 	for i := 0; i < 120; i++ {
 		grades = append(grades, gateway.Step{Content: gradeJSON}, gateway.Step{Content: pairJSON})
@@ -587,7 +608,7 @@ cases:
 	}
 	viewJSON := `{"urgent_danger":{"present":false},"qualification":"q","suggested_reply":"r","decisive_insight":"i","tradeoff_or_objection":"t","depends_on":"d","fallback":"f"}`
 	judgeJSON := `{"urgent_danger":{"present":false},"qualification":"q","recommended_reply":"r","why":"w","accepted_cost":"c","next":{"immediate":"i","forward":"f"},"change_course_if":"cc"}`
-	gradeJSON := `{"scores":{"grounding_calibration":3,"context_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	gradeJSON := `{"scores":{"grounding_and_calibration":3,"context_and_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
 	pairJSON := `{"verdict":"tie","margin":"clear","consequential_difference":"d"}`
 	views := []gateway.Step{}
 	for i := 0; i < 200; i++ {

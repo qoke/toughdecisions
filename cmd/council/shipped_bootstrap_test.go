@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -39,30 +40,50 @@ func TestShippedExampleBootstrapOffline(t *testing.T) {
 
 	viewJSON := `{"urgent_danger":{"present":false},"qualification":"q","suggested_reply":"r","decisive_insight":"i","tradeoff_or_objection":"t","depends_on":"d","fallback":"f"}`
 	judgeJSON := `{"urgent_danger":{"present":false},"qualification":"q","recommended_reply":"r","why":"w","accepted_cost":"c","next":{"immediate":"i","forward":"f"},"change_course_if":"cc"}`
-	gradeAll3 := `{"scores":{"grounding_calibration":3,"context_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
-	gradeAll1Flag := `{"scores":{"grounding_calibration":1,"context_values_fidelity":1,"decision_insight":1,"practical_robustness":1,"role_execution":1},"supporting_passages":{"decision_insight":"p"},"flags":[{"type":"values_substitution","passage":"p","violated":"v"}],"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
-	grade33233 := `{"scores":{"grounding_calibration":3,"context_values_fidelity":3,"decision_insight":3,"practical_robustness":2,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
-	grade01101Flag := `{"scores":{"grounding_calibration":0,"context_values_fidelity":1,"decision_insight":1,"practical_robustness":0,"role_execution":1},"supporting_passages":{"decision_insight":"p"},"flags":[{"type":"fabrication","passage":"p","violated":"v"}],"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	gradeAll3 := `{"scores":{"grounding_and_calibration":3,"context_and_values_fidelity":3,"decision_insight":3,"practical_robustness":3,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	gradeAll1Flag := `{"scores":{"grounding_and_calibration":1,"context_and_values_fidelity":1,"decision_insight":1,"practical_robustness":1,"role_execution":1},"supporting_passages":{"decision_insight":"p"},"flags":[{"type":"values_substitution","passage":"p","violated":"v"}],"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	grade33233 := `{"scores":{"grounding_and_calibration":3,"context_and_values_fidelity":3,"decision_insight":3,"practical_robustness":2,"role_execution":3},"supporting_passages":{"decision_insight":"p"},"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
+	grade01101Flag := `{"scores":{"grounding_and_calibration":0,"context_and_values_fidelity":1,"decision_insight":1,"practical_robustness":0,"role_execution":1},"supporting_passages":{"decision_insight":"p"},"flags":[{"type":"fabrication","passage":"p","violated":"v"}],"notes_check":{"noticed":[],"missed":[],"beyond_notes":[]}}`
 	// A/clear verdicts need no reversal and parse first try (one call
 	// per grader per compare job).
 	pairJSON := `{"verdict":"A","margin":"clear","consequential_difference":"d"}`
-	views := []gateway.Step{}
+	// Baselines generate seats in per-case order (3 views then judge),
+	// but the router serves each seat model from its own queue: give the
+	// view seats pure view queues and the judge seat a pure judge queue
+	// so every seat call parses as its own type.
+	viewSteps := []gateway.Step{}
 	for i := 0; i < 400; i++ {
-		views = append(views, gateway.Step{Content: viewJSON})
+		viewSteps = append(viewSteps, gateway.Step{Content: viewJSON, ModelReturned: "gpt-view-a-2026"})
 	}
-	views = append(views, gateway.Step{Content: judgeJSON}, gateway.Step{Content: judgeJSON})
+	views := append([]gateway.Step{}, viewSteps...)
+	judgeOnly := []gateway.Step{}
+	for i := 0; i < 200; i++ {
+		judgeOnly = append(judgeOnly, gateway.Step{Content: judgeJSON, ModelReturned: "gpt-judge-a-2026"})
+	}
 	// council-judge-a serves BOTH the judge seat and the selection-a
 	// grader; the Fake keys scripts by model id only, so route on the
 	// seat tag: seat calls carry Tags["seat"], grader calls (absolute
 	// with Tags["grader"], pairwise with neither) never do.
-	judgeViews := append([]gateway.Step{}, views...)
+	judgeViews := append([]gateway.Step{}, judgeOnly...)
+	// Per-seat prefixes must match the shipped models.yaml or the
+	// substitution guard marks the response substituted (non-gradeable):
+	// council-view-b needs claude-view-b-2026, council-view-c needs
+	// gemini-view-c-2026. Only council-view-a matches gpt-view-a-2026.
+	claudeViews := make([]gateway.Step, 0, len(viewSteps))
+	for i := 0; i < 400; i++ {
+		claudeViews = append(claudeViews, gateway.Step{Content: viewJSON, ModelReturned: "claude-view-b-2026"})
+	}
+	geminiViews := make([]gateway.Step, 0, len(viewSteps))
+	for i := 0; i < 400; i++ {
+		geminiViews = append(geminiViews, gateway.Step{Content: viewJSON, ModelReturned: "gemini-view-c-2026"})
+	}
 	possViews := append([]gateway.Step{}, views...)
 	scripts := map[string][]gateway.Step{}
 	dual := gateway.NewFake(scripts)
 	router := newTagRouter(dual, judgeViews, gradeAll3, gradeAll1Flag, grade33233, grade01101Flag, pairJSON)
 	router.queues["council-view-a#seat"] = append([]gateway.Step{}, possViews...)
-	router.queues["council-view-b#seat"] = append([]gateway.Step{}, possViews...)
-	router.queues["council-view-c#seat"] = append([]gateway.Step{}, possViews...)
+	router.queues["council-view-b#seat"] = append([]gateway.Step{}, claudeViews...)
+	router.queues["council-view-c#seat"] = append([]gateway.Step{}, geminiViews...)
 	old := gatewayFactory
 	gatewayFactory = func(_ *config.Config, _ logx.Logger) gateway.Client { return router }
 	defer func() { gatewayFactory = old }()
@@ -147,6 +168,7 @@ func shippedRepoRoot(t *testing.T) string {
 // calls with Tags["grader"] set consume the grades queue, seat calls
 // consume the judge-views queue. All other models delegate to the Fake.
 type tagRouter struct {
+	mu       sync.Mutex
 	seat     *gateway.Fake
 	queues   map[string][]gateway.Step
 	calByKey map[string]gateway.Step
@@ -173,13 +195,16 @@ func (t *tagRouter) Chat(ctx context.Context, req gateway.ChatRequest) (gateway.
 		// view queues positionally.
 		if _, ok := req.Tags["seat"]; ok {
 			key := req.Model + "#seat"
+			t.mu.Lock()
 			q := t.queues[key]
 			if len(q) == 0 {
+				t.mu.Unlock()
 				return gateway.ChatResponse{ModelReturned: req.Model}, nil
 			}
 			step := q[0]
 			t.queues[key] = q[1:]
 			t.seat.Calls = append(t.seat.Calls, req)
+			t.mu.Unlock()
 			return gateway.ChatResponse{ModelReturned: orModel(step.ModelReturned, req.Model), Content: step.Content}, nil
 		}
 		// Grader calls are content-aware (positional queues underflow
@@ -189,7 +214,9 @@ func (t *tagRouter) Chat(ctx context.Context, req gateway.ChatRequest) (gateway.
 		//   calibration response text; match CAL-00x by the quoted text.
 		// - all other absolute grades → generic all-3 grade.
 		step := t.gradeStep(req)
+		t.mu.Lock()
 		t.seat.Calls = append(t.seat.Calls, req)
+		t.mu.Unlock()
 		return gateway.ChatResponse{ModelReturned: orModel(step.ModelReturned, req.Model), Content: step.Content}, nil
 	}
 	return t.seat.Chat(ctx, req)
