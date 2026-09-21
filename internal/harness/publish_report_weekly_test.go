@@ -161,6 +161,7 @@ func TestPublishBaselinesAtomicAndRollbackWorks(t *testing.T) {
 		scripts[m] = steps
 	}
 	scripts["j1"] = []gateway.Step{{Content: hJudgeJSON}, {Content: hJudgeJSON}, {Content: hJudgeJSON}}
+	scripts["cand-m"] = []gateway.Step{{Content: hViewJSON}, {Content: hViewJSON}}
 	fx := setupHarness(t, scripts)
 	c := seedPublishSelection(t, fx)
 	run, _ := fx.runner.StartRun("weekly", fx.pk.ID, "{}")

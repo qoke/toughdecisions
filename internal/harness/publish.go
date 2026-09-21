@@ -29,6 +29,10 @@ type PublishResult struct {
 	Forced    bool
 	Baselines int
 	Bundles   int
+	// SkippedBaselines counts generated responses dropped as
+	// non-gradeable (failed/substituted/timed-out/unparseable) instead of
+	// becoming baselines. Always reported, never silent.
+	SkippedBaselines int
 }
 
 // ChecklistBlockedError refuses a publish whose checklist fails without
@@ -42,6 +46,19 @@ func (e *ChecklistBlockedError) Error() string {
 	return fmt.Sprintf("harness: checklist for candidate %q failed: publish refused (use --force to override)", e.CandidateKey)
 }
 
+// NoGradeableEvidenceError refuses a publish whose generated baseline
+// responses contain no gradeable evidence: every generation failed, timed
+// out, was substituted, or failed to parse. Publishing baselines from such
+// a run would poison the promotion comparison with fake references.
+type NoGradeableEvidenceError struct {
+	Total   int
+	Skipped int
+}
+
+func (e *NoGradeableEvidenceError) Error() string {
+	return fmt.Sprintf("harness: publish refused: no gradeable baseline evidence (%d generated, %d skipped as failed/substituted/timed-out/unparseable)", e.Total, e.Skipped)
+}
+
 // Publish implements plan §12.7: refuse on a failing checklist unless
 // --force (recording the override in promotion_json), build the new seats
 // map, then swap the active pack AND insert every baseline + natural-bundle
@@ -53,7 +70,8 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 		if err != nil {
 			return nil, err
 		}
-		if err := r.fillBaselinesTx(ctx, pk, pk.ID); err != nil {
+		skipped, err := r.fillBaselinesTx(ctx, pk, pk.ID)
+		if err != nil {
 			return nil, err
 		}
 		nb, err := r.countNaturalBundles()
@@ -64,7 +82,10 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 		if err != nil {
 			return nil, err
 		}
-		return &PublishResult{Pack: pk, Baselines: nbl, Bundles: nb}, nil
+		if skipped > 0 {
+			r.log.Warn("harness: publish skipped non-gradeable baselines", "skipped", skipped, "baselines", nbl)
+		}
+		return &PublishResult{Pack: pk, Baselines: nbl, Bundles: nb, SkippedBaselines: skipped}, nil
 	}
 	if opts.RunID == "" {
 		return nil, fmt.Errorf("harness: publish needs a run id")
@@ -111,7 +132,7 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 		return nil, fmt.Errorf("harness: encode seats: %w", err)
 	}
 	newID := ids.NewID()
-	seeds, bundles, err := r.publishSeeds(ctx, seats, newID)
+	seeds, skipped, bundles, err := r.publishSeeds(ctx, seats, newID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +158,10 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 	if err != nil {
 		return nil, err
 	}
-	return &PublishResult{Pack: pk, Forced: forced, Baselines: len(seeds), Bundles: len(bundles)}, nil
+	if skipped > 0 {
+		r.log.Warn("harness: publish skipped non-gradeable baselines", "skipped", skipped, "baselines", len(seeds))
+	}
+	return &PublishResult{Pack: pk, Forced: forced, Baselines: len(seeds), Bundles: len(bundles), SkippedBaselines: skipped}, nil
 }
 
 // seatsForPublish builds the new seats map: the active pack with the
@@ -171,93 +195,142 @@ func (r *Runner) seatsForPublish(cur *pack.Pack, row *store.Candidate) (map[pack
 // The judge baseline response is keyed (pack, judge, case) with the
 // baseline bundle shown. All ids are preassigned so PublishAtomic writes
 // them in one transaction.
-func (r *Runner) publishSeeds(ctx context.Context, seats map[pack.Seat]pack.SeatConfig, packID string) ([]store.BaselineSeed, []store.BundleSeed, error) {
+//
+// Only gradeable responses (parsed OK, no error/timeout/substitution,
+// non-empty text) become baselines; failures are recorded as absent, never
+// silently substituted. Each skipped (seat, case) triple is counted in the
+// returned skipped total and logged by the caller, and a run with no
+// gradeable evidence at all is refused. Bundles still snapshot from every
+// generation (even failed text, rendered as raw qualification) so the judge
+// call shape stays stable.
+func (r *Runner) publishSeeds(ctx context.Context, seats map[pack.Seat]pack.SeatConfig, packID string) ([]store.BaselineSeed, int, []store.BundleSeed, error) {
 	families, err := r.db.ListFamilies()
 	if err != nil {
-		return nil, nil, fmt.Errorf("harness: list families: %w", err)
+		return nil, 0, nil, fmt.Errorf("harness: list families: %w", err)
 	}
 	var seeds []store.BaselineSeed
 	var bundles []store.BundleSeed
+	total, skipped := 0, 0
 	for _, f := range families {
 		if f.Split != "selection" {
 			continue
 		}
 		cases, err := r.db.ListCasesByFamily(f.ID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("harness: list cases for %q: %w", f.FamilyKey, err)
+			return nil, 0, nil, fmt.Errorf("harness: list cases for %q: %w", f.FamilyKey, err)
 		}
 		for _, c := range cases {
 			in, err := CaseInputFor(c)
 			if err != nil {
-				return nil, nil, err
+				return nil, 0, nil, err
 			}
 			inputHash := InputHashFor(in)
 			views := map[string]schema.RenderedView{}
-			gens := map[pack.Seat]*store.Response{}
+			type pendingSeed struct {
+				seed store.BaselineSeed
+				resp *store.Response
+			}
+			var pending []pendingSeed
 			for _, seat := range []pack.Seat{pack.SeatPossibility, pack.SeatPerspective, pack.SeatStressTester} {
 				cfg, ok := seats[seat]
 				if !ok {
-					return nil, nil, fmt.Errorf("harness: seat %q not in publish seats", string(seat))
+					return nil, 0, nil, fmt.Errorf("harness: seat %q not in publish seats", string(seat))
 				}
 				gen, err := r.GenerateResponse(ctx, GenRequest{
 					Seat: seat, SeatCfg: cfg, Input: in,
 					InputHash: inputHash, RunID: "",
 				})
 				if err != nil {
-					return nil, nil, fmt.Errorf("harness: baseline seat %q case %q: %w", string(seat), c.CaseKey, err)
+					return nil, 0, nil, fmt.Errorf("harness: baseline seat %q case %q: %w", string(seat), c.CaseKey, err)
 				}
-				gens[seat] = gen.Response
+				total++
 				v, ok := parseView(gen.Response)
 				if !ok {
 					v = schema.RenderedView{Role: string(seat), Qualification: gen.Response.RawText}
 				}
 				views[string(seat)] = v
-				seeds = append(seeds, store.BaselineSeed{
-					Key:    packID + "/" + string(seat) + "/" + c.ID,
-					PackID: packID, Seat: string(seat), CaseID: c.ID,
-					ResponseID: gen.Response.ID,
+				pending = append(pending, pendingSeed{
+					seed: store.BaselineSeed{
+						Key:    packID + "/" + string(seat) + "/" + c.ID,
+						PackID: packID, Seat: string(seat), CaseID: c.ID,
+						ResponseID: gen.Response.ID,
+					},
+					resp: gen.Response,
 				})
 			}
 			bundle, err := r.naturalBundleFor(c, views, packID)
 			if err != nil {
-				return nil, nil, err
+				return nil, 0, nil, err
 			}
 			bundle.ID = ids.NewID()
 			bundles = append(bundles, *bundle)
 			jcfg, ok := seats[pack.SeatJudge]
 			if !ok {
-				return nil, nil, fmt.Errorf("harness: seat %q not in publish seats", string(pack.SeatJudge))
+				return nil, 0, nil, fmt.Errorf("harness: seat %q not in publish seats", string(pack.SeatJudge))
 			}
 			jgen, err := r.GenerateResponse(ctx, GenRequest{
 				Seat: pack.SeatJudge, SeatCfg: jcfg, Input: in,
 				InputHash: inputHash, Bundle: bundleRow(bundle), RunID: "",
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("harness: baseline seat %q case %q: %w", string(pack.SeatJudge), c.CaseKey, err)
+				return nil, 0, nil, fmt.Errorf("harness: baseline seat %q case %q: %w", string(pack.SeatJudge), c.CaseKey, err)
 			}
+			total++
 			bid := bundle.ID
-			seeds = append(seeds, store.BaselineSeed{
-				Key:    packID + "/" + string(pack.SeatJudge) + "/" + c.ID,
-				PackID: packID, Seat: string(pack.SeatJudge), CaseID: c.ID,
-				BundleID: &bid, ResponseID: jgen.Response.ID,
+			pending = append(pending, pendingSeed{
+				seed: store.BaselineSeed{
+					Key:    packID + "/" + string(pack.SeatJudge) + "/" + c.ID,
+					PackID: packID, Seat: string(pack.SeatJudge), CaseID: c.ID,
+					BundleID: &bid, ResponseID: jgen.Response.ID,
+				},
+				resp: jgen.Response,
 			})
+			for _, p := range pending {
+				if gradeableResponse(p.resp) {
+					seeds = append(seeds, p.seed)
+				} else {
+					skipped++
+				}
+			}
 		}
 	}
-	if len(seeds) == 0 {
-		return nil, nil, fmt.Errorf("harness: no selection cases for baselines")
+	if len(seeds) == 0 && total == 0 {
+		return nil, 0, nil, fmt.Errorf("harness: no selection cases for baselines")
 	}
-	return seeds, bundles, nil
+	if len(seeds) == 0 {
+		return nil, 0, nil, &NoGradeableEvidenceError{Total: total, Skipped: skipped}
+	}
+	return seeds, skipped, bundles, nil
+}
+
+// gradeableResponse reports whether a generated baseline response is valid
+// evidence: parsed OK with no gateway error, no timeout, no substitution,
+// and non-empty text. Baselines point at responses rows that the promotion
+// checklist later grades, so a failed/substituted/timed-out/unparseable row
+// is not valid baseline evidence.
+func gradeableResponse(resp *store.Response) bool {
+	if resp == nil {
+		return false
+	}
+	if resp.Substituted || resp.TimedOut || !resp.ParseOK {
+		return false
+	}
+	if resp.Error != nil && *resp.Error != "" {
+		return false
+	}
+	return resp.RawText != ""
 }
 
 // fillBaselinesTx generates baselines under the pack's own seats and writes
-// them plus natural snapshots atomically on packID.
-func (r *Runner) fillBaselinesTx(ctx context.Context, pk *pack.Pack, packID string) error {
-	seeds, bundles, err := r.publishSeeds(ctx, pk.Seats, packID)
+// them plus natural snapshots atomically on packID. It returns the number
+// of non-gradeable generations skipped (reported, never silent).
+func (r *Runner) fillBaselinesTx(ctx context.Context, pk *pack.Pack, packID string) (int, error) {
+	seeds, skipped, bundles, err := r.publishSeeds(ctx, pk.Seats, packID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	_, err = r.db.PublishAtomic(store.PackTxSeed{Baselines: seeds, Bundles: bundles})
-	return err
+	return skipped, err
 }
 
 // naturalBundleFor builds the natural-bundle seed for one case from freshly
