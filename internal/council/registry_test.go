@@ -32,9 +32,10 @@ func TestRegistryFanoutAndUnsubscribeOnFull(t *testing.T) {
 	}
 	select {
 	case _, ok := <-ch1:
-		if ok {
-			// Drained one; the slow subscriber must be gone by now.
+		if !ok {
+			t.Fatal("slow subscriber channel closed; want a drained event")
 		}
+		// Drained one; the slow subscriber must be gone by now.
 	case <-time.After(3 * time.Second):
 		t.Fatal("slow subscriber publish blocked forever")
 	}

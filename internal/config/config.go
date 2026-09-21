@@ -58,5 +58,5 @@ func Load() (*Config, error) {
 
 // RedactedString returns header-safe config output with secrets masked.
 func (c *Config) RedactedString() string {
-	return c.Structure.Report()
+	return c.Report()
 }

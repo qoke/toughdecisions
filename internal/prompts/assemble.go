@@ -112,11 +112,6 @@ func resolveRole(role, override string) (string, error) {
 	return embedded, nil
 }
 
-// viewSystem builds the system message for a view seat.
-func viewSystem(role string) (string, error) {
-	return viewSystemWithOverride(role, "")
-}
-
 // viewSystemWithOverride builds the view system message, replacing the
 // embedded role prompt when override is non-empty.
 func viewSystemWithOverride(role, override string) (string, error) {

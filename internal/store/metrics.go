@@ -41,7 +41,16 @@ func (db *DB) RequestTimings(since string) (firstUsable, finals []int64, count i
 		return nil, nil, 0, fmt.Errorf("store: request count: %w", err)
 	}
 	collect := func(col string) ([]int64, error) {
-		rows, err := db.db.Query(`SELECT `+col+` FROM requests WHERE created_at >= ? AND `+col+` IS NOT NULL`, since)
+		var query string
+		switch col {
+		case "t_first_usable_view_ms":
+			query = `SELECT t_first_usable_view_ms FROM requests WHERE created_at >= ? AND t_first_usable_view_ms IS NOT NULL`
+		case "t_final_ms":
+			query = `SELECT t_final_ms FROM requests WHERE created_at >= ? AND t_final_ms IS NOT NULL`
+		default:
+			return nil, fmt.Errorf("store: request timings: unknown column %q", col)
+		}
+		rows, err := db.db.Query(query, since)
 		if err != nil {
 			return nil, fmt.Errorf("store: request timings: %w", err)
 		}

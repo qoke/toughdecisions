@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -217,26 +218,9 @@ func TestPublishBaselinesOnlyKeepsActive(t *testing.T) {
 	}
 }
 
-// isChecklistBlocked unwraps to *ChecklistBlockedError without importing
-// errors in every call site via errors.As.
+// isChecklistBlocked unwraps to *ChecklistBlockedError via errors.As.
 func isChecklistBlocked(err error, target **ChecklistBlockedError) bool {
-	if err == nil {
-		return false
-	}
-	type causer interface{ As(any) bool }
-	// Minimal errors.As inline to keep imports small.
-	for e := err; e != nil; {
-		if be, ok := e.(*ChecklistBlockedError); ok {
-			*target = be
-			return true
-		}
-		u, ok := e.(interface{ Unwrap() error })
-		if !ok {
-			return false
-		}
-		e = u.Unwrap()
-	}
-	return false
+	return errors.As(err, target)
 }
 
 func TestReportSectionsAndWebhookFailure(t *testing.T) {

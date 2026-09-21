@@ -32,5 +32,10 @@ func serveHTTP(cfg *config.Config, log logx.Logger) error {
 	runner := council.NewRunner(db, gw, reg, cfg, log, mreg)
 	srv := httpapi.New(db, runner, reg, cfg, log)
 	log.Info("serving", "listen", cfg.ServerListen())
-	return http.ListenAndServe(cfg.ServerListen(), srv.Handler())
+	httpSrv := &http.Server{
+		Addr:              cfg.ServerListen(),
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return httpSrv.ListenAndServe()
 }

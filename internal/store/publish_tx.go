@@ -8,12 +8,6 @@ import (
 	"github.com/qoke/toughdecisions/internal/ids"
 )
 
-// execer covers *sql.DB and *sql.Tx for the tx-aware helpers below.
-type execer interface {
-	Exec(query string, args ...any) (sql.Result, error)
-	QueryRow(query string, args ...any) *sql.Row
-}
-
 // PackTxSeed carries the inserts the atomic publish transaction performs.
 type PackTxSeed struct {
 	// New pack to insert; empty NewStatus skips pack activation

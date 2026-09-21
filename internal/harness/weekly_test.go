@@ -324,7 +324,7 @@ func TestWeeklyHappyPathRunsStepsInOrder(t *testing.T) {
 	if sentinelLast == -1 || compareFirst == -1 || downstreamFirst == -1 {
 		t.Fatalf("compare calls = %+v; want sentinel, compare, and downstream calls", probe.calls)
 	}
-	if !(sentinelLast < compareFirst && compareFirst <= downstreamFirst) {
+	if sentinelLast >= compareFirst || compareFirst > downstreamFirst {
 		t.Fatalf("order = sentinel-last %d compare-first %d downstream-first %d; want sentinel < compare <= downstream",
 			sentinelLast, compareFirst, downstreamFirst)
 	}

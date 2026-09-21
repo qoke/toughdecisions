@@ -68,9 +68,10 @@ func TestPairwiseBothFamiliesUsesSubstitute(t *testing.T) {
 		t.Fatalf("conflicted grader calls = %d; want 0 (sa must be substituted)", n)
 	}
 	for _, c := range fx.fake.Calls {
-		if !(strings.Contains(c.Model, "gsub") || strings.Contains(c.Model, "gs2")) {
-			t.Fatalf("model call = %q; want gsub or gs2 only", c.Model)
+		if strings.Contains(c.Model, "gsub") || strings.Contains(c.Model, "gs2") {
+			continue
 		}
+		t.Fatalf("model call = %q; want gsub or gs2 only", c.Model)
 	}
 	rows, lerr := fx.db.ListPairwiseByRun("run-sg", "case-sg")
 	if lerr != nil {

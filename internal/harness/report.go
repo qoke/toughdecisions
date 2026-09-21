@@ -67,7 +67,7 @@ func (r *Runner) Report(ctx context.Context, opts ReportOptions) (*ReportResult,
 	r.writeFailures(&b, opts)
 	md := b.String()
 	dir := r.cfg.ReportsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("harness: create reports dir: %w", err)
 	}
 	path := filepath.Join(dir, opts.RunID+".md")
