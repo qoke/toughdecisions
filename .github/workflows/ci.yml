@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Dev builds run offline (GOPROXY=off GOSUMDB=off) against a pre-populated
+# module cache. CI has network access and fetches modules normally. GOFLAGS must
+# stay -mod=readonly in CI so a build can never silently rewrite go.mod/go.sum.
+env:
+  GOFLAGS: -mod=readonly
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          # Pins the toolchain to the `go` directive in go.mod (1.25).
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "the following files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -count=1
+
+      - name: go test (race)
+        run: go test ./... -race -count=1
+
+      - name: coverage gate (every package >= 80%)
+        env:
+          MIN_COVERAGE: "80"
+        run: |
+          go test ./... -count=1 -coverprofile=coverage.out
+          # Enumerate the real package list first: a package with no test files
+          # emits no rows in the profile, so iterating only over coverage.out could
+          # never fail it. Every listed package is measured, absent => 0.0%.
+          go list ./... > packages.txt
+          awk -v min="${MIN_COVERAGE}" '
+            FNR == NR { pkgs[$1] = 1; next }       # packages.txt: one import path per line
+            FNR == 1 { next }                      # coverage.out: "mode: set|atomic|count"
+            {
+              split($1, loc, ":")                  # file.go:startLine.col,endLine.col
+              dir = loc[1]
+              sub(/\/[^/]*$/, "", dir)             # package = directory of the file
+              total[dir] += $2                     # $2 = number of statements in block
+              if ($3 + 0 > 0) covered[dir] += $2   # $3 = execution count
+            }
+            END {
+              failed = 0
+              for (pkg in pkgs) {
+                # No rows for this package => it has no test files => 0.0%.
+                pct = (total[pkg] > 0) ? 100 * covered[pkg] / total[pkg] : 0.0
+                if (pct < min) {
+                  printf "FAIL  %6.1f%%  %s\n", pct, pkg
+                  failed = 1
+                } else {
+                  printf "ok    %6.1f%%  %s\n", pct, pkg
+                }
+              }
+              if (failed) {
+                printf "coverage gate failed: every package must be >= %d%%\n", min
+                exit 1
+              }
+              printf "coverage gate passed: every package >= %d%%\n", min
+            }
+          ' packages.txt coverage.out
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2

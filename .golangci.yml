@@ -1,0 +1,58 @@
+# golangci-lint config (v2 schema) — matches golangci-lint v2.13.2 pinned in
+# .github/workflows/ci.yml.
+#
+# Deliberately conservative: every linter enabled here is justified below, and
+# the set is tuned so the whole tree stays clean. CI lints the entire tree on
+# every run, so the baseline must stay at zero findings.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # Start from nothing and enable an explicit set, so a tool upgrade cannot
+  # silently switch additional linters on.
+  default: none
+  enable:
+    - errcheck      # unchecked error returns
+    - govet         # go vet analyzers
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # staticcheck suite (unused is enabled separately)
+    - unused        # unused constants/vars/functions/types
+    - gosec         # security-focused checks
+  settings:
+    gosec:
+      # gosec duplicates errcheck for unchecked errors (G104) and flags
+      # operator-supplied paths on a CLI. Keep the rules that matter for an
+      # HTTP/SQLite service.
+      excludes:
+        - G104  # unhandled errors — covered by errcheck above
+        - G304  # file path provided as taint input (CLI takes operator paths)
+        - G204  # subprocess launched with variable (documented CLI behaviour)
+        - G302  # file permissions (report/output files are intentionally 0644)
+        - G306  # WriteFile permissions
+
+  exclusions:
+    # std-error-handling ignores unchecked `defer x.Close()` and fmt.Print
+    # returns, the dominant errcheck pattern in this tree.
+    presets:
+      - std-error-handling
+    rules:
+      # Tests may ignore errors and use fixed paths freely.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  # gofmt + goimports. No local-prefixes grouping: this codebase keeps std,
+  # module-local, and third-party imports in one alphabetized block.
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  # Report everything; CI lints the whole tree and fails on any finding.
+  max-issues-per-linter: 0
+  max-same-issues: 0

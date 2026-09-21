@@ -6,3 +6,11 @@ data/
 *.db-shm
 reports/
 internal/harness/reports/
+cmd/council/council
+cmd/council/council.exe
+cmd/council/main
+cmd/council/main.exe
+bin/
+coverage.out
+coverage.html
+cmd/council/council.json

@@ -1,0 +1,21 @@
+.git
+.github
+.fdx
+.opencode
+
+# Runtime state: never copy a database or generated report into an image.
+data/
+reports/
+internal/harness/reports/
+*.db
+*.db-wal
+*.db-shm
+
+# Build/test artifacts
+bin/
+coverage.out
+coverage.html
+
+# Docs not needed at build time
+DEVELOPMENT_PLAN.md
+PRODUCT_SPEC.md
