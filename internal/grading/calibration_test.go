@@ -39,7 +39,7 @@ func putCalibItem(t *testing.T, db *store.DB, key string, humanScores map[string
 
 func evenScores(v int) map[string]int {
 	return map[string]int{
-		"grounding_calibration": v, "context_values_fidelity": v,
+		"grounding_and_calibration": v, "context_and_values_fidelity": v,
 		"decision_insight": v, "practical_robustness": v, "role_execution": v,
 	}
 }

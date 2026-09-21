@@ -15,7 +15,7 @@ func TestGradeConcurrentSameResponseInsertsOneFlagSet(t *testing.T) {
 	g := insertGrader(t, db, mkGrader("conc", "openai", "selection", true))
 	resp := mkResponse(t, db, "possibility", "concurrent grade body text here")
 	scores := map[string]int{
-		"grounding_calibration": 3, "context_values_fidelity": 3,
+		"grounding_and_calibration": 3, "context_and_values_fidelity": 3,
 		"decision_insight": 3, "practical_robustness": 3, "role_execution": 3,
 	}
 	fake := gateway.NewFake(map[string][]gateway.Step{})

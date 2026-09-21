@@ -144,7 +144,7 @@ func TestGradeCacheHitHydratesFlags(t *testing.T) {
 	g := insertGrader(t, db, mkGrader("hf", "openai", "selection", true))
 	resp := mkResponse(t, db, "possibility", "hydration response body here")
 	scores := map[string]int{
-		"grounding_calibration": 3, "context_values_fidelity": 3,
+		"grounding_and_calibration": 3, "context_and_values_fidelity": 3,
 		"decision_insight": 3, "practical_robustness": 3, "role_execution": 3,
 	}
 	flag := `{"type":"coercive","passage":"p","violated":"v"}`

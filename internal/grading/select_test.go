@@ -152,7 +152,7 @@ func TestGradeInsertsGradeAndFlags(t *testing.T) {
 	g := insertGrader(t, db, mkGrader("ga", "openai", "selection", true))
 	resp := mkResponse(t, db, "possibility", "some thoughtful advice text here")
 	scores := map[string]int{
-		"grounding_calibration": 3, "context_values_fidelity": 3,
+		"grounding_and_calibration": 3, "context_and_values_fidelity": 3,
 		"decision_insight": 2, "practical_robustness": 3, "role_execution": 3,
 	}
 	flag := `{"type":"coercive","passage":"p","violated":"v"}`
@@ -191,7 +191,7 @@ func TestGradeCacheHitSkipsCall(t *testing.T) {
 	g := insertGrader(t, db, mkGrader("gb", "openai", "selection", true))
 	resp := mkResponse(t, db, "perspective", "another response body here")
 	scores := map[string]int{
-		"grounding_calibration": 2, "context_values_fidelity": 2,
+		"grounding_and_calibration": 2, "context_and_values_fidelity": 2,
 		"decision_insight": 2, "practical_robustness": 2, "role_execution": 2,
 	}
 	fake := gateway.NewFake(map[string][]gateway.Step{
@@ -224,7 +224,7 @@ func TestGradeRubricChangeMissesCache(t *testing.T) {
 	g := insertGrader(t, db, mkGrader("gc", "openai", "selection", true))
 	resp := mkResponse(t, db, "judge", "judge response body here")
 	scores := map[string]int{
-		"grounding_calibration": 3, "context_values_fidelity": 3,
+		"grounding_and_calibration": 3, "context_and_values_fidelity": 3,
 		"decision_insight": 3, "practical_robustness": 3, "role_execution": 3,
 	}
 	fake := gateway.NewFake(map[string][]gateway.Step{
@@ -254,7 +254,7 @@ func TestGradeRetriesOnceOnParseFailure(t *testing.T) {
 	g := insertGrader(t, db, mkGrader("gd", "openai", "selection", true))
 	resp := mkResponse(t, db, "possibility", "retry response body here")
 	scores := map[string]int{
-		"grounding_calibration": 3, "context_values_fidelity": 3,
+		"grounding_and_calibration": 3, "context_and_values_fidelity": 3,
 		"decision_insight": 3, "practical_robustness": 3, "role_execution": 3,
 	}
 	fake := gateway.NewFake(map[string][]gateway.Step{
