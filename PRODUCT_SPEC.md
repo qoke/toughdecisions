@@ -1,5 +1,7 @@
 
-# Relationship Council: Weekly Harness and Fast Production
+# Tough Decisions Council: Weekly Harness and Fast Production
+
+Make hard decisions (relationship or otherwise) easier.
 
 Use one fixed architecture:
 

@@ -1,4 +1,4 @@
-// Command council is the Relationship Council CLI entry point.
+// Command council is the Tough Decisions Council CLI entry point.
 package main
 
 import (

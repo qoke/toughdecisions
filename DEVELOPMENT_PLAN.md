@@ -7,7 +7,7 @@ Save the following as `DEVELOPMENT_PLAN.md`.
 
 ---
 
-# DEVELOPMENT_PLAN.md — Relationship Council (Go)
+# DEVELOPMENT_PLAN.md — Tough Decisions Council (Go)
 
 ## 0. Read this first
 

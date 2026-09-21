@@ -1,4 +1,4 @@
-# Relationship Council
+# Tough Decisions Council
 
 Two systems, one binary (`council`): the **production system** (`council serve`)
 and the **harness** (`council harness …`, `council pack …`, `council graders …`).
