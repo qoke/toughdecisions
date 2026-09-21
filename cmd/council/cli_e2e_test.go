@@ -462,6 +462,8 @@ func TestHarnessSentinelSuccessOffline(t *testing.T) {
 		"  - id: mga\n    family: openai\n    expected_response_model_prefixes: [\"mga\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
 		"  - id: mgb\n    family: anthropic\n    expected_response_model_prefixes: [\"mgb\"]\n" +
+		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
+		"  - id: mgs\n    family: google\n    expected_response_model_prefixes: [\"mgs\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n"
 	mp := t.TempDir() + "/models.yaml"
 	if err := os.WriteFile(mp, []byte(models), 0o644); err != nil {
@@ -470,7 +472,8 @@ func TestHarnessSentinelSuccessOffline(t *testing.T) {
 	t.Setenv("COUNCIL_MODELS_FILE", mp)
 	graders := "graders:\n" +
 		"  - {key: grader-a, model: mga, family: openai, role: selection, max_output_tokens: 2000}\n" +
-		"  - {key: grader-b, model: mgb, family: anthropic, role: selection, max_output_tokens: 2000}\n"
+		"  - {key: grader-b, model: mgb, family: anthropic, role: selection, max_output_tokens: 2000}\n" +
+		"  - {key: grader-sub, model: mgs, family: google, role: substitute, max_output_tokens: 2000}\n"
 	if err := os.WriteFile(filepath.Join(dir, "graders.yaml"), []byte(graders), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -497,9 +500,11 @@ func TestHarnessSentinelSuccessOffline(t *testing.T) {
 		grades = append(grades, gateway.Step{Content: gradeJSON}, gateway.Step{Content: pairJSON})
 	}
 	fake := gateway.NewFake(map[string][]gateway.Step{
-		"m1":  views,
-		"mga": append([]gateway.Step{}, grades...),
-		"mgb": append([]gateway.Step{}, grades...),
+		"m1":    views,
+		"mga":   append([]gateway.Step{}, grades...),
+		"mgb":   append([]gateway.Step{}, grades...),
+		"mgs":   append([]gateway.Step{}, grades...),
+		"mgsub": append([]gateway.Step{}, grades...),
 	})
 	old := gatewayFactory
 	gatewayFactory = func(_ *config.Config, _ logx.Logger) gateway.Client { return fake }
@@ -551,6 +556,7 @@ cases:
 		"  - id: mgb\n    family: anthropic\n    expected_response_model_prefixes: [\"mgb\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
 		"  - id: mgs\n    family: other\n    expected_response_model_prefixes: [\"mgs\"]\n" +
+		"  - id: mgsub\n    family: google\n    expected_response_model_prefixes: [\"mgsub\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n"
 	mp := t.TempDir() + "/models.yaml"
 	if err := os.WriteFile(mp, []byte(models), 0o644); err != nil {
@@ -565,7 +571,8 @@ cases:
 	graders := "graders:\n" +
 		"  - {key: grader-a, model: mga, family: openai, role: selection, max_output_tokens: 2000}\n" +
 		"  - {key: grader-b, model: mgb, family: anthropic, role: selection, max_output_tokens: 2000}\n" +
-		"  - {key: grader-s, model: mgs, family: other, role: screening, max_output_tokens: 2000}\n"
+		"  - {key: grader-s, model: mgs, family: other, role: screening, max_output_tokens: 2000}\n" +
+		"  - {key: grader-sub, model: mgsub, family: google, role: substitute, max_output_tokens: 2000}\n"
 	if err := os.WriteFile(filepath.Join(dir, "graders.yaml"), []byte(graders), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -592,10 +599,11 @@ cases:
 		grades = append(grades, gateway.Step{Content: gradeJSON}, gateway.Step{Content: pairJSON})
 	}
 	fake := gateway.NewFake(map[string][]gateway.Step{
-		"m1":  views,
-		"mga": append([]gateway.Step{}, grades...),
-		"mgb": append([]gateway.Step{}, grades...),
-		"mgs": append([]gateway.Step{}, grades...),
+		"m1":    views,
+		"mga":   append([]gateway.Step{}, grades...),
+		"mgb":   append([]gateway.Step{}, grades...),
+		"mgs":   append([]gateway.Step{}, grades...),
+		"mgsub": append([]gateway.Step{}, grades...),
 	})
 	old := gatewayFactory
 	gatewayFactory = func(_ *config.Config, _ logx.Logger) gateway.Client { return fake }
