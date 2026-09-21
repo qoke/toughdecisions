@@ -87,14 +87,16 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 	if !cl.PromoteRecommended && !opts.Force {
 		return nil, &ChecklistBlockedError{CandidateKey: opts.CandidateKey, Rows: cl.Rows}
 	}
+	// The forced marker joins the PublishAtomic transaction below
+	// (PackTxSeed.ForcedCandidateID/ForcedPromotionJSON) so the marker and
+	// the pack swap commit atomically (M1).
+	var forcedPromotionJSON *string
 	if !cl.PromoteRecommended && opts.Force {
 		forced = true
 		cl.Forced = true
 		raw, _ := json.Marshal(cl)
 		s := string(raw)
-		if err := r.db.UpdateCandidateResults(row.ID, &store.CandidateResults{PromotionJSON: &s}); err != nil {
-			return nil, fmt.Errorf("harness: record forced publish: %w", err)
-		}
+		forcedPromotionJSON = &s
 	}
 	cur, err := packActive(r)
 	if err != nil {
@@ -114,7 +116,7 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 		return nil, err
 	}
 	runID := opts.RunID
-	res, err := r.db.PublishAtomic(store.PackTxSeed{
+	seed := store.PackTxSeed{
 		NewID:     newID,
 		NewStatus: pack.StatusActive,
 		NewSeats:  string(seatsJSON),
@@ -122,7 +124,12 @@ func (r *Runner) Publish(ctx context.Context, opts PublishOptions) (*PublishResu
 		NewRunID:  &runID,
 		Baselines: seeds,
 		Bundles:   bundles,
-	})
+	}
+	if forcedPromotionJSON != nil {
+		seed.ForcedCandidateID = row.ID
+		seed.ForcedPromotionJSON = forcedPromotionJSON
+	}
+	res, err := r.db.PublishAtomic(seed)
 	if err != nil {
 		return nil, err
 	}

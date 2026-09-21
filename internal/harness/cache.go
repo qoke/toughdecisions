@@ -22,14 +22,18 @@ import (
 // GenRequest is one response-generation call: the seat config, the input
 // snapshot, and (for the judge seat) the baseline bundle. Repetition is
 // resolved by the helper: 0 unless Fresh, which uses MaxRepetition()+1.
+// ResponseFamily is the model family that produced the response (SeatCfg
+// family, resolved by models/candidates config): compare steps use it for
+// R-12 self-grading avoidance via SelectGrader.
 type GenRequest struct {
-	Seat      pack.Seat
-	SeatCfg   pack.SeatConfig
-	Input     schema.CaseInput
-	InputHash string
-	Bundle    *store.Bundle
-	RunID     string
-	Fresh     bool
+	Seat           pack.Seat
+	SeatCfg        pack.SeatConfig
+	Input          schema.CaseInput
+	InputHash      string
+	Bundle         *store.Bundle
+	RunID          string
+	Fresh          bool
+	ResponseFamily string
 }
 
 // GenResult is the stored response plus whether it came from the cache.

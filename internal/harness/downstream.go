@@ -151,6 +151,7 @@ func (r *Runner) downstreamOne(ctx context.Context, runID string, pk *pack.Pack,
 	verdict, agreed, diff, err := cmp(ctx, compareInput{
 		Acceptance: cc.Family.AcceptanceJSON, CaseID: cc.Case.ID,
 		Seat: string(seat), Case: cc.Input,
+		ResponseFamilies: downstreamJudgeFamilies(seat, candCfg, pk),
 	}, candJudge, incJudge, graders, runID)
 	if err != nil {
 		return nil, fmt.Errorf("harness: downstream compare case %q: %w", cc.Case.CaseKey, err)
@@ -186,6 +187,7 @@ func (r *Runner) downstreamOne(ctx context.Context, runID string, pk *pack.Pack,
 		verdict2, agreed2, diff2, err := cmp(ctx, compareInput{
 			Acceptance: cc.Family.AcceptanceJSON, CaseID: cc.Case.ID,
 			Seat: string(seat), Case: cc.Input,
+			ResponseFamilies: downstreamJudgeFamilies(seat, candCfg, pk),
 		}, refreshed.cand, refreshed.inc, graders, runID)
 		if err != nil {
 			return nil, fmt.Errorf("harness: downstream fresh compare case %q: %w", cc.Case.CaseKey, err)
@@ -193,6 +195,22 @@ func (r *Runner) downstreamOne(ctx context.Context, runID string, pk *pack.Pack,
 		v.Verdict, v.Agreed, v.Difference, v.FreshRepeat = verdict2, agreed2, diff2, true
 	}
 	return v, nil
+}
+
+// downstreamJudgeFamilies returns the model families behind the two judge
+// councils under comparison for R-12 routing: the candidate judge family
+// only for a judge candidate, else the incumbent judge family shared by
+// both councils (which still routes a same-family grader to the
+// substitute, never a sibling).
+func downstreamJudgeFamilies(seat pack.Seat, candCfg pack.SeatConfig, pk *pack.Pack) []string {
+	judgeCfg, ok := pk.Seats[pack.SeatJudge]
+	if !ok {
+		return nil
+	}
+	if seat == pack.SeatJudge {
+		return responseFamilies(candCfg.Family, judgeCfg.Family)
+	}
+	return responseFamilies(judgeCfg.Family)
 }
 
 // downstreamBundles builds the incumbent and candidate bundle views. A view

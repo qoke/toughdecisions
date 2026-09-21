@@ -24,6 +24,7 @@ func seedCompareGraders(t *testing.T, fx *hFixture) {
 	t.Helper()
 	insertHGrader(t, fx.db, "sa", "gs1", "openai", "selection", true)
 	insertHGrader(t, fx.db, "sb", "gs2", "anthropic", "selection", true)
+	insertHGrader(t, fx.db, "sub", "gsub", "google", "substitute", true)
 }
 
 func compareScripts(n int) map[string][]gateway.Step {
@@ -34,10 +35,12 @@ func compareScripts(n int) map[string][]gateway.Step {
 		"cand-m": {{Content: hViewJSON}, {Content: hViewJSON}, {Content: hViewJSON}, {Content: hViewJSON}, {Content: hViewJSON}, {Content: hViewJSON}},
 		"gs1":    {},
 		"gs2":    {},
+		"gsub":   {},
 	}
 	for i := 0; i < n; i++ {
 		scripts["gs1"] = append(scripts["gs1"], grade, pair)
 		scripts["gs2"] = append(scripts["gs2"], grade, pair)
+		scripts["gsub"] = append(scripts["gsub"], grade, pair)
 	}
 	return scripts
 }
