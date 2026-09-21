@@ -26,11 +26,15 @@ type ChecklistRow struct {
 }
 
 // Checklist is the promotion evaluation for one candidate.
-// PromoteRecommended is true iff all six automated rules pass.
+// PromoteRecommended is true iff all six automated rules pass. Forced is
+// true when the pack was published with --force despite a failing
+// checklist; it is recorded in promotion_json so a forced publish is
+// never silent.
 type Checklist struct {
 	CandidateKey       string
 	Rows               []ChecklistRow
 	PromoteRecommended bool
+	Forced             bool
 }
 
 // ChecklistInput carries the per-run evidence for the checklist. Every
