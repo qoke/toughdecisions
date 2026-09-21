@@ -1,1 +1,37 @@
-candidates: []
+# Example candidate configuration (DEVELOPMENT_PLAN.md §10, §12.2).
+#
+# At most 3 candidates. Each candidate targets one seat; screen runs it on
+# development cases whose family `seats_relevant` includes that seat.
+# An empty list (`candidates: []`) skips screen/compare/downstream in
+# `council harness weekly`. Model settings are validated against
+# config/models.yaml (unsupported settings are REJECTED, never dropped).
+# Editing an entry changes its config_hash, which re-runs screening.
+#
+#   finalist: auto   - finalist iff the screen passes (§12.2 rule)
+#             force  - always a finalist
+#             never  - never a finalist
+candidates:
+  # View-seat challenger: screened on development cases relevant to
+  # the possibility seat. model/temperature/top_p must be supported by
+  # config/models.yaml (council-view-b: temperature + top_p, no
+  # reasoning_effort).
+  - key: cand-possibility-b
+    seat: possibility
+    model: council-view-b
+    family: anthropic
+    temperature: 0.7
+    max_output_tokens: 2000
+    finalist: auto
+    notes: Challenger for the possibility seat.
+
+  # Judge-seat challenger. Optional: role_prompt_file (a repo-relative path
+  # to a role prompt; setting both role_prompt_file and role_prompt_override
+  # is an error).
+  - key: cand-judge-a
+    seat: judge
+    model: council-judge-a
+    family: openai
+    temperature: 0.2
+    max_output_tokens: 3000
+    finalist: auto
+    notes: Challenger for the judge seat.
