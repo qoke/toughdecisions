@@ -74,7 +74,11 @@ func (s *Service) Grade(ctx context.Context, in schema.CaseInput, acceptance str
 	}
 	key := GradeCacheKey(resp.ID, grader.ConfigHash, rubricHash)
 	if existing, err := s.db.GetGradeByCacheKey(key); err == nil {
-		return &GradeResult{Grade: existing}, nil
+		flags, ferr := s.db.ListFlagsByGradeID(existing.ID)
+		if ferr != nil {
+			return nil, errf("load grade flags: %v", ferr)
+		}
+		return &GradeResult{Grade: existing, Flags: flags}, nil
 	}
 	blind := Blind(resp)
 	msgs, err := prompts.BuildAbsoluteGrade(in, acceptance, blind.Role, blind.Rendered)
@@ -157,6 +161,9 @@ func (s *Service) insertGrade(resp *store.Response, grader *Grader, rubricHash, 
 	})
 	if err != nil {
 		return nil, nil, errf("insert grade: %v", err)
+	}
+	if existing, err := s.db.ListFlagsByGradeID(stored.ID); err == nil && len(existing) > 0 {
+		return stored, existing, nil
 	}
 	var flags []*store.Flag
 	for _, f := range grade.Flags {
