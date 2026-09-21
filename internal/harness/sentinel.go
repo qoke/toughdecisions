@@ -204,6 +204,14 @@ type compareInput struct {
 	CaseID     string
 	Seat       string
 	Case       schema.CaseInput
+	// ResponseFamilies holds the distinct model families (SeatCfg.Family)
+	// behind the two responses under comparison. pairwiseBoth routes each
+	// selection grader past ResponseFamilies via grading.SelectGrader
+	// (R-12): a same-family grader yields the admitted substitute, never a
+	// sibling, and an unadmitted/absent substitute is a hard error.
+	// Callers pass CandFamily/IncFamily for compare, or the seat config
+	// families for sentinel (fresh vs baseline) and downstream councils.
+	ResponseFamilies []string
 }
 
 // SentinelRegression is one seat x case sentinel comparison.
@@ -367,6 +375,7 @@ func (r *Runner) Sentinel(ctx context.Context, opts SentinelOptions) (*SentinelS
 		verdict, agreed, diff, err := compare(ctx, compareInput{
 			Acceptance: fam.AcceptanceJSON, CaseID: j.c.ID,
 			Seat: string(j.seat), Case: in,
+			ResponseFamilies: responseFamilies(pk.Seats[j.seat].Family),
 		}, fresh[i], base, graders, run.ID)
 		if err != nil {
 			return fail(fmt.Errorf("harness: compare seat %q case %q: %w", string(j.seat), j.c.CaseKey, err))
@@ -410,17 +419,12 @@ func IsRegression(agreed bool, verdictLeftRight, difference string) bool {
 	return agreed && verdictLeftRight == "right" && strings.TrimSpace(difference) != ""
 }
 
-// compareDefault resolves same-family routing per response and runs both
-// selection graders through grading.Compare.
+// compareDefault resolves R-12 self-grading routing per response family
+// and runs both selection graders through grading.Compare.
 func (r *Runner) compareDefault(ctx context.Context, in compareInput, fresh, baseline *store.Response, graders []*grading.Grader, runID string) (string, bool, string, error) {
-	sub := r.SubstituteGrader()
-	resolved := make([]*grading.Grader, 0, 2)
-	for _, g := range graders {
-		sel, err := grading.SelectGrader([]*grading.Grader{g}, familyOf(fresh), sub)
-		if err != nil {
-			return "", false, "", err
-		}
-		resolved = append(resolved, sel)
+	resolved, err := r.resolveGraders(graders, in.ResponseFamilies)
+	if err != nil {
+		return "", false, "", err
 	}
 	callCtx, cancel := context.WithDeadline(ctx, time.Now().Add(r.GraderDeadline()))
 	defer cancel()
@@ -432,15 +436,85 @@ func (r *Runner) compareDefault(ctx context.Context, in compareInput, fresh, bas
 	return res.Verdict, agreed, res.Difference, nil
 }
 
-func familyOf(resp *store.Response) string {
-	// Stored responses carry no family; routing uses the seat's pack
-	// family resolved by callers. The runner passes "" here only when the
-	// family is unknown, which never matches a grader family.
-	_ = resp
-	return ""
+// resolveGraders applies R-12 self-grading avoidance: for every response
+// family under comparison, a same-family grader is replaced by the admitted
+// substitute via grading.SelectGrader. It never returns a same-family
+// grader; an unadmitted/absent substitute is a hard error.
+func (r *Runner) resolveGraders(graders []*grading.Grader, families []string) ([]*grading.Grader, error) {
+	// R-12 across both responses: a grader that shares ANY response family
+	// is ineligible. Prefer the first eligible selection grader; only when
+	// every selection grader conflicts does the admitted substitute serve
+	// (and it must itself differ from every family, else hard error).
+	fams := responseFamilies(families...)
+	sub := r.SubstituteGrader()
+	resolved := make([]*grading.Grader, 0, len(graders))
+	for _, g := range graders {
+		if g != nil && !sharesFamily(g, fams) {
+			resolved = append(resolved, g)
+			continue
+		}
+		if sub == nil {
+			return nil, errNoSubstitute(fams)
+		}
+		sel, err := grading.SelectGrader([]*grading.Grader{}, joinFams(fams), sub)
+		if err != nil {
+			return nil, err
+		}
+		// SelectGrader checks a single family string; enforce the rest
+		// here so the substitute must differ from every family.
+		if sharesFamily(sel, fams) {
+			return nil, errNoSubstitute(fams)
+		}
+		resolved = append(resolved, sel)
+	}
+	return resolved, nil
 }
 
-// packActive returns the active production pack for harness steps.
+// sharesFamily reports whether the grader shares any response family.
+func sharesFamily(g *grading.Grader, fams []string) bool {
+	if g == nil {
+		return false
+	}
+	for _, f := range fams {
+		if f != "" && g.Family == f {
+			return true
+		}
+	}
+	return false
+}
+
+// joinFams renders families for the single-family SelectGrader contract.
+// The substitute path validates one family via SelectGrader and the rest
+// via sharesFamily, so the join is only a routing token, never a bypass.
+func joinFams(fams []string) string {
+	if len(fams) == 0 {
+		return ""
+	}
+	return fams[0]
+}
+
+// errNoSubstitute is the hard R-12 error when every selection grader
+// shares a response family and no admitted substitute can serve.
+func errNoSubstitute(fams []string) error {
+	return fmt.Errorf("harness: R-12 self-grading avoidance: every selection grader shares response families %q and no admitted substitute can serve: %w",
+		strings.Join(fams, ","), grading.ErrSameFamily)
+}
+
+// responseFamilies returns the distinct non-empty model families behind
+// two responses (candidate/incumbent or fresh/baseline seat configs).
+func responseFamilies(fams ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range fams {
+		if f == "" || seen[f] {
+			continue
+		}
+		seen[f] = true
+		out = append(out, f)
+	}
+	return out
+}
+
 func packActive(r *Runner) (*pack.Pack, error) {
 	pk, err := pack.Active(r.db)
 	if err != nil {

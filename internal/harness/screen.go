@@ -1,10 +1,12 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +45,14 @@ type candidatesFile struct {
 	Candidates []CandidateSpec `yaml:"candidates"`
 }
 
+// decodeCandidatesStrict unmarshals candidates YAML while rejecting
+// unknown/misspelled fields, matching internal/casepack's strict decoder.
+func decodeCandidatesStrict(raw []byte, v any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	return dec.Decode(v)
+}
+
 // LoadCandidates parses path and validates every entry: at most
 // MaxCandidates, a known seat, a finalist mode of auto|force|never, and
 // model settings through models.ValidateSettings (rejects unsupported
@@ -53,7 +63,7 @@ func (r *Runner) LoadCandidates(path string) ([]CandidateSpec, error) {
 		return nil, fmt.Errorf("harness: read candidates %s: %w", path, err)
 	}
 	var f candidatesFile
-	if err := yaml.Unmarshal(raw, &f); err != nil {
+	if err := decodeCandidatesStrict(raw, &f); err != nil {
 		return nil, fmt.Errorf("harness: parse candidates %s: %w", path, err)
 	}
 	if len(f.Candidates) > MaxCandidates {
@@ -78,7 +88,11 @@ func (r *Runner) LoadCandidates(path string) ([]CandidateSpec, error) {
 		}
 		override := c.RolePromptInline
 		if c.RolePromptFile != "" {
-			oraw, err := os.ReadFile(c.RolePromptFile)
+			resolved, err := pack.ResolveRolePromptFile(filepath.Dir(path), c.RolePromptFile)
+			if err != nil {
+				return nil, fmt.Errorf("harness: candidate %q %w", c.Key, err)
+			}
+			oraw, err := os.ReadFile(resolved)
 			if err != nil {
 				return nil, fmt.Errorf("harness: candidate %q role_prompt_file: %w", c.Key, err)
 			}

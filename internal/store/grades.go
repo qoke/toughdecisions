@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/qoke/toughdecisions/internal/ids"
 )
@@ -29,8 +30,12 @@ const gradeCols = `id, created_at, cache_key, response_id, grader_config_hash,
 	rubric_hash, scores_json, passages_json, weakness_json, flags_json,
 	notes_check_json, raw_json, run_id`
 
-// InsertGrade inserts a grade row. cache_key is UNIQUE: concurrent same-key
-// inserts must reuse the existing row (GetGradeByCacheKey) per R-14.
+// InsertGrade inserts a grade row. cache_key is UNIQUE: a concurrent
+// same-key insert reuses the existing row (mirroring the response A2 path
+// in internal/harness/cache.go insertOrReuse) and returns it with a nil
+// error. Callers must treat the returned row as canonical: it may be the
+// pre-existing row, so flag rows must be reconciled (see ListFlagsByGradeID)
+// instead of blindly re-inserted.
 func (db *DB) InsertGrade(g *Grade) (*Grade, error) {
 	if g.CacheKey == "" {
 		return nil, errors.New("store: insert grade: empty cache_key")
@@ -59,6 +64,11 @@ func (db *DB) InsertGrade(g *Grade) (*Grade, error) {
 		row.RubricHash, row.ScoresJSON, row.PassagesJSON, row.WeaknessJSON,
 		row.FlagsJSON, row.NotesCheckJSON, row.RawJSON, row.RunID,
 	); err != nil {
+		if isUniqueViolation(err) {
+			if existing, gerr := db.GetGradeByCacheKey(g.CacheKey); gerr == nil {
+				return existing, nil
+			}
+		}
 		return nil, fmt.Errorf("store: insert grade: %w", err)
 	}
 	return row, nil
@@ -84,6 +94,37 @@ func scanGrade(row packRow) (*Grade, error) {
 		return nil, fmt.Errorf("store: scan grade: %w", err)
 	}
 	return &g, nil
+}
+
+// isUniqueViolation reports whether err is a UNIQUE constraint failure
+// (SQLite message text; modernc driver surfaces it as a plain error).
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") || strings.Contains(msg, "unique_")
+}
+
+// ListFlagsByGradeID lists flags for one grade ordered by creation.
+// Grading reconciles flag rows against this list after a grade-cache reuse
+// so a duplicate-key insert never duplicates flag rows.
+func (db *DB) ListFlagsByGradeID(gradeID string) ([]*Flag, error) {
+	rows, err := db.db.Query(`SELECT `+flagCols+` FROM flags WHERE grade_id = ? ORDER BY created_at, id`, gradeID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list flags by grade: %w", err)
+	}
+	defer rows.Close()
+	var out []*Flag
+	for rows.Next() {
+		var f Flag
+		if err := rows.Scan(&f.ID, &f.CreatedAt, &f.GradeID, &f.ResponseID, &f.Type,
+			&f.Passage, &f.Violated, &f.Status, &f.ResolutionNote, &f.RunID); err != nil {
+			return nil, fmt.Errorf("store: scan flag: %w", err)
+		}
+		out = append(out, &f)
+	}
+	return out, rows.Err()
 }
 
 // Flag is a row in the flags table.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,8 +50,8 @@ type ReportResult struct {
 // {run_id, summary, report_markdown}; a webhook failure is logged and
 // NEVER fails the report.
 func (r *Runner) Report(ctx context.Context, opts ReportOptions) (*ReportResult, error) {
-	if opts.RunID == "" {
-		return nil, fmt.Errorf("harness: report needs a run id")
+	if err := validateReportRunID(opts.RunID); err != nil {
+		return nil, err
 	}
 	var b strings.Builder
 	r.writeRunSummary(&b, opts)
@@ -80,12 +81,63 @@ func (r *Runner) Report(ctx context.Context, opts ReportOptions) (*ReportResult,
 	return res, nil
 }
 
+// validateReportRunID rejects empty or path-escaping run ids (SEC-H1):
+// the id becomes a file name under the reports dir, so it must equal its
+// own base name and contain no separator.
+func validateReportRunID(runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("harness: report needs a run id")
+	}
+	if runID == "." || runID == ".." {
+		return fmt.Errorf("harness: invalid report run id %q", runID)
+	}
+	if runID != filepath.Base(runID) || strings.ContainsAny(runID, `/\`) {
+		return fmt.Errorf("harness: invalid report run id %q", runID)
+	}
+	return nil
+}
+
+// webhookHTTPClient is a dedicated client with an explicit timeout
+// (SEC-M1): the default client has no timeout.
+var webhookHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
+// sanitizeWebhookError redacts the request URL (SEC-M2): raw errors echo
+// the full URL including any embedded token, so logs carry only the host
+// and the error class.
+func sanitizeWebhookError(url string, err error) string {
+	host := "unparseable-url"
+	if u, perr := urlpkg.Parse(url); perr == nil && u.Host != "" {
+		host = u.Host
+	}
+	if err == nil {
+		return host
+	}
+	return host + ": " + errClass(err)
+}
+
+func errClass(err error) string {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
+		return "timeout"
+	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "no such host"):
+		return "connection-error"
+	default:
+		return "request-error"
+	}
+}
+
 // notifyWebhook POSTs {run_id, summary, report_markdown}. Any failure is
-// logged and returns false; it never fails the run nor suppresses the
-// already-written report.
+// logged (redacted, never the raw URL) and returns false; it never fails
+// the run nor suppresses the already-written report.
 func (r *Runner) notifyWebhook(ctx context.Context, runID, summary, md string) bool {
 	url := strings.TrimSpace(r.cfg.NotifyWebhookURL())
 	if url == "" {
+		return false
+	}
+	parsed, err := urlpkg.Parse(url)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		r.log.Warn("harness: webhook url rejected", "run_id", runID, "host", sanitizeWebhookError(url, nil))
 		return false
 	}
 	raw, _ := json.Marshal(map[string]string{
@@ -93,18 +145,18 @@ func (r *Runner) notifyWebhook(ctx context.Context, runID, summary, md string) b
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
-		r.log.Warn("harness: webhook request failed", "run_id", runID, "err", err)
+		r.log.Warn("harness: webhook request failed", "run_id", runID, "err", sanitizeWebhookError(url, err))
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webhookHTTPClient.Do(req)
 	if err != nil {
-		r.log.Warn("harness: webhook post failed", "run_id", runID, "err", err)
+		r.log.Warn("harness: webhook post failed", "run_id", runID, "err", sanitizeWebhookError(url, err))
 		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		r.log.Warn("harness: webhook post failed", "run_id", runID, "status", resp.Status)
+		r.log.Warn("harness: webhook post failed", "run_id", runID, "status", resp.Status, "host", sanitizeWebhookError(url, nil))
 		return false
 	}
 	return true

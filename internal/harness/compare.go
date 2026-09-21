@@ -218,7 +218,7 @@ func (r *Runner) Compare(ctx context.Context, opts CompareOptions) (*CompareResu
 		return fail(err)
 	}
 	res := &CompareResult{RunID: runID, CandidateKey: opts.Spec.Key, Seat: string(seat)}
-	if err := r.verdictCompareCases(ctx, runID, res, cases, pairs, cmp, graders); err != nil {
+	if err := r.verdictCompareCases(ctx, runID, res, cases, pairs, cmp, graders, candCfg, incCfg); err != nil {
 		return fail(err)
 	}
 	if err := r.rerunFragility(ctx, runID, res, seat, candCfg, incCfg, cases, pairs, cmp, graders); err != nil {
@@ -268,21 +268,20 @@ func (r *Runner) selectionPair() ([]*grading.Grader, error) {
 // and downstream share one default with different purposes.
 func (r *Runner) comparePurpose(purpose string) CompareFunc {
 	return func(ctx context.Context, in compareInput, left, right *store.Response, graders []*grading.Grader, runID string) (string, bool, string, error) {
-		return r.pairwiseBoth(ctx, purpose, in.CaseID, in.Seat, in.Case, in.Acceptance, left, right, graders, runID)
+		return r.pairwiseBothFamilies(ctx, purpose, in.CaseID, in.Seat, in.Case, in.Acceptance, in.ResponseFamilies, left, right, graders, runID)
 	}
 }
 
-// pairwiseBoth resolves same-family routing per grader and runs grading
-// Compare with both selection graders under the grader-call deadline.
-func (r *Runner) pairwiseBoth(ctx context.Context, purpose, caseID, seat string, in schema.CaseInput, acceptance string, left, right *store.Response, graders []*grading.Grader, runID string) (string, bool, string, error) {
-	sub := r.SubstituteGrader()
-	resolved := make([]*grading.Grader, 0, 2)
-	for _, g := range graders {
-		sel, err := grading.SelectGrader([]*grading.Grader{g}, "", sub)
-		if err != nil {
-			return "", false, "", err
-		}
-		resolved = append(resolved, sel)
+// pairwiseBothFamilies resolves R-12 self-grading routing and runs
+// grading Compare with both selection graders under the grader-call
+// deadline. families holds the model families behind the two responses
+// under comparison (see compareInput.ResponseFamilies): each same-family
+// grader yields the admitted substitute, never a sibling, and an
+// unadmitted/absent substitute is a hard error.
+func (r *Runner) pairwiseBothFamilies(ctx context.Context, purpose, caseID, seat string, in schema.CaseInput, acceptance string, families []string, left, right *store.Response, graders []*grading.Grader, runID string) (string, bool, string, error) {
+	resolved, err := r.resolveGraders(graders, families)
+	if err != nil {
+		return "", false, "", err
 	}
 	callCtx, cancel := context.WithDeadline(ctx, time.Now().Add(r.GraderDeadline()))
 	defer cancel()
@@ -307,7 +306,7 @@ func (r *Runner) genComparePairs(ctx context.Context, runID string, seat pack.Se
 		cr, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: candCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: fresh,
+			RunID: runID, Fresh: fresh, ResponseFamily: candCfg.Family,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: candidate case %q: %w", cc.Case.CaseKey, err)
@@ -315,7 +314,7 @@ func (r *Runner) genComparePairs(ctx context.Context, runID string, seat pack.Se
 		ir, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: incCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: fresh,
+			RunID: runID, Fresh: fresh, ResponseFamily: incCfg.Family,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: incumbent case %q: %w", cc.Case.CaseKey, err)
@@ -353,11 +352,12 @@ func (r *Runner) gradeComparePairs(ctx context.Context, runID string, cases []*C
 
 // verdictCompareCases runs the pairwise step per case and aggregates the
 // agreed hard/priority tallies.
-func (r *Runner) verdictCompareCases(ctx context.Context, runID string, res *CompareResult, cases []*CompareCase, pairs []comparePair, cmp CompareFunc, graders []*grading.Grader) error {
+func (r *Runner) verdictCompareCases(ctx context.Context, runID string, res *CompareResult, cases []*CompareCase, pairs []comparePair, cmp CompareFunc, graders []*grading.Grader, candCfg, incCfg pack.SeatConfig) error {
 	for i, cc := range cases {
 		verdict, agreed, diff, err := cmp(ctx, compareInput{
 			Acceptance: cc.Family.AcceptanceJSON, CaseID: cc.Case.ID,
 			Seat: string(pack.Seat(res.Seat)), Case: cc.Input,
+			ResponseFamilies: responseFamilies(candCfg.Family, incCfg.Family),
 		}, pairs[i].cand, pairs[i].inc, graders, runID)
 		if err != nil {
 			return fmt.Errorf("harness: compare case %q: %w", cc.Case.CaseKey, err)
@@ -417,7 +417,7 @@ func (r *Runner) rerunFragility(ctx context.Context, runID string, res *CompareR
 		cr, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: candCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: true,
+			RunID: runID, Fresh: true, ResponseFamily: candCfg.Family,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: fragility candidate case %q: %w", cc.Case.CaseKey, err)
@@ -425,7 +425,7 @@ func (r *Runner) rerunFragility(ctx context.Context, runID string, res *CompareR
 		ir, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: incCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: true,
+			RunID: runID, Fresh: true, ResponseFamily: incCfg.Family,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: fragility incumbent case %q: %w", cc.Case.CaseKey, err)
@@ -433,6 +433,7 @@ func (r *Runner) rerunFragility(ctx context.Context, runID string, res *CompareR
 		verdict, agreed, _, err := cmp(ctx, compareInput{
 			Acceptance: cc.Family.AcceptanceJSON, CaseID: cc.Case.ID,
 			Seat: string(seat), Case: cc.Input,
+			ResponseFamilies: responseFamilies(candCfg.Family, incCfg.Family),
 		}, cr.Response, ir.Response, graders, runID)
 		if err != nil {
 			return fmt.Errorf("harness: fragility compare case %q: %w", cc.Case.CaseKey, err)

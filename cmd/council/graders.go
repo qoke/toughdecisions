@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -58,6 +59,14 @@ func graderConfigHash(e graderEntry) string {
 	}))
 }
 
+// decodeGradersStrict unmarshals graders YAML while rejecting
+// unknown/misspelled fields, matching internal/casepack's strict decoder.
+func decodeGradersStrict(raw []byte, v any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	return dec.Decode(v)
+}
+
 // syncGradersFile parses the graders file, upserts every entry by
 // config_hash, and returns the stored rows.
 func syncGradersFile(db *store.DB, path string) ([]*store.GraderConfig, error) {
@@ -66,7 +75,7 @@ func syncGradersFile(db *store.DB, path string) ([]*store.GraderConfig, error) {
 		return nil, fmt.Errorf("read graders %s: %w", path, err)
 	}
 	var f gradersFile
-	if err := yaml.Unmarshal(raw, &f); err != nil {
+	if err := decodeGradersStrict(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse graders %s: %w", path, err)
 	}
 	if len(f.Graders) == 0 {

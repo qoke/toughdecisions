@@ -30,6 +30,12 @@ type PackTxSeed struct {
 	Baselines []BaselineSeed
 	// Bundles upserted as natural snapshots with source_pack_id set later.
 	Bundles []BundleSeed
+	// ForcedCandidateID, when set with a non-nil ForcedPromotionJSON,
+	// records the --force override (PromotionJSON.Forced=true) in the SAME
+	// transaction as the pack swap, so a crash between the marker write
+	// and PublishAtomic can never leave inconsistent state (M1).
+	ForcedCandidateID   string
+	ForcedPromotionJSON *string
 }
 
 // BaselineSeed is one baseline row for the atomic transaction.
@@ -115,6 +121,12 @@ func (db *DB) PublishAtomic(seed PackTxSeed) (*PublishAtomicResult, error) {
 		for _, bl := range seed.Baselines {
 			if err := upsertBaselineTx(tx, bl); err != nil {
 				return err
+			}
+		}
+		if seed.ForcedCandidateID != "" && seed.ForcedPromotionJSON != nil {
+			if _, err := tx.Exec(`UPDATE candidates SET promotion_json=? WHERE id=?`,
+				*seed.ForcedPromotionJSON, seed.ForcedCandidateID); err != nil {
+				return fmt.Errorf("store: publish forced marker: %w", err)
 			}
 		}
 		return nil

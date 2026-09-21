@@ -97,6 +97,12 @@ func writeTemp(t *testing.T, name, content string) string {
 
 func setupHarness(t *testing.T, scripts map[string][]gateway.Step) *hFixture {
 	t.Helper()
+	// H1: keep Report output out of the repo tree: default the reports dir
+	// at a temp dir BEFORE config.Load reads the environment, unless the
+	// caller already set COUNCIL_REPORTS_DIR (e.g. weeklyEnv).
+	if os.Getenv("COUNCIL_REPORTS_DIR") == "" {
+		t.Setenv("COUNCIL_REPORTS_DIR", filepath.Join(t.TempDir(), "reports"))
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -829,8 +835,8 @@ func TestAccessorsAndHelpers(t *testing.T) {
 	if sub := fx.runner.SubstituteGrader(); sub == nil || sub.GraderKey != "sub" {
 		t.Fatalf("SubstituteGrader = %+v", sub)
 	}
-	if familyOf(nil) != "" {
-		t.Fatal("familyOf should be empty for unknown families")
+	if len(responseFamilies("", "")) != 0 {
+		t.Fatal("responseFamilies should drop empty families")
 	}
 	if got := P50([]int64{30, 10, 20}); got != 20 {
 		t.Fatalf("P50 = %d; want 20", got)
@@ -901,16 +907,41 @@ func TestLoadCandidatesValidationBranches(t *testing.T) {
 	if _, err := fx.runner.LoadCandidates(p); err == nil {
 		t.Fatal("malformed yaml: want error")
 	}
-	// Valid: role prompt file resolves to an override.
-	rp := writeTemp(t, "role.md", "custom role")
-	p = writeTemp(t, "c6.yaml", "candidates:\n  - {key: a, seat: possibility, model: cand-m, family: openai, role_prompt_file: "+rp+", finalist: force}\n")
+	// Absolute role_prompt_file rejected (SEC-H2: must stay inside the
+	// candidates file directory).
+	abs := writeTemp(t, "abs_role.md", "custom role")
+	p = writeTemp(t, "c8.yaml", "candidates:\n  - {key: a, seat: possibility, model: cand-m, family: openai, role_prompt_file: "+abs+"}\n")
+	if _, err := fx.runner.LoadCandidates(p); err == nil {
+		t.Fatal("absolute role file: want error")
+	}
+	// ../ escape rejected (SEC-H2).
+	p = writeTemp(t, "c9.yaml", "candidates:\n  - {key: a, seat: possibility, model: cand-m, family: openai, role_prompt_file: ../escape.md}\n")
+	if _, err := fx.runner.LoadCandidates(p); err == nil {
+		t.Fatal("../ escape role file: want error")
+	}
+	// Valid: role prompt file resolves to an override. The resolver treats
+	// the reference as relative to the candidates file directory.
+	rpdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rpdir, "role.md"), []byte("custom role"), 0o644); err != nil {
+		t.Fatalf("write role.md: %v", err)
+	}
+	p = filepath.Join(rpdir, "c6.yaml")
+	if err := os.WriteFile(p, []byte("candidates:\n  - {key: a, seat: possibility, model: cand-m, family: openai, role_prompt_file: role.md, finalist: force}\n"), 0o644); err != nil {
+		t.Fatalf("write c6.yaml: %v", err)
+	}
 	got, err := fx.runner.LoadCandidates(p)
 	if err != nil || len(got) != 1 || got[0].Finalist != "force" {
 		t.Fatalf("role file candidates = %+v, %v; want one force", got, err)
 	}
-	// Empty role prompt file.
-	empty := writeTemp(t, "empty.md", "  \n")
-	p = writeTemp(t, "c7.yaml", "candidates:\n  - {key: a, seat: possibility, model: cand-m, family: openai, role_prompt_file: "+empty+"}\n")
+	// Empty role prompt file (sibling-relative so it reaches the empty check).
+	edir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(edir, "empty.md"), []byte("  \n"), 0o644); err != nil {
+		t.Fatalf("write empty.md: %v", err)
+	}
+	p = filepath.Join(edir, "c7.yaml")
+	if err := os.WriteFile(p, []byte("candidates:\n  - {key: a, seat: possibility, model: cand-m, family: openai, role_prompt_file: empty.md}\n"), 0o644); err != nil {
+		t.Fatalf("write c7.yaml: %v", err)
+	}
 	if _, err := fx.runner.LoadCandidates(p); err == nil {
 		t.Fatal("empty role file: want error")
 	}
