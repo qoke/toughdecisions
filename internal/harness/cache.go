@@ -167,8 +167,8 @@ func (r *Runner) storeFailed(_ context.Context, g GenRequest, key string, repeti
 func (r *Runner) storeSuccess(_ context.Context, g GenRequest, key string, repetition int, bundleHash *string, cfgHash, packHash string, chatResp gateway.ChatResponse, latency int64) (*GenResult, error) {
 	content := chatResp.Content
 	returned := chatResp.ModelReturned
-	// The scripted fake does not enforce substitution; check expected
-	// prefixes so a wrong model is a failure, never a silent substitution.
+	// The scripted fake enforces substitution like the real gateway; check
+	// expected prefixes so a wrong model is a failure, never a silent substitution.
 	if !matchesPrefix(returned, r.models.ExpectedPrefixes(g.SeatCfg.Model)) {
 		subErr := &gateway.SubstitutionError{
 			Response: gateway.ChatResponse{ModelReturned: returned, Content: content},

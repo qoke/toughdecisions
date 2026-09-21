@@ -165,14 +165,103 @@ func TestLiteLLMSubstitutionMismatch(t *testing.T) {
 }
 
 func TestLiteLLMHeaderSubstitution(t *testing.T) {
+	// The x-litellm-model-id header is a deployment identifier, not a model
+	// name, so it must never trigger substitution: a matching body model
+	// succeeds even when the header does not match any expected prefix.
 	srv := httptest.NewServer(okHandler(
 		`{"model":"gpt-x-1","choices":[{"message":{"content":"x"},"finish_reason":"stop"}],"usage":{}}`,
 		map[string]string{"x-litellm-model-id": "other-provider-model"}))
 	defer srv.Close()
 	client := New(&http.Client{}, srv.URL, "k", 4, testLogger(t))
+	resp, err := client.Chat(context.Background(), ChatRequest{Model: "m", ExpectedModelPrefixes: []string{"gpt-x-"}})
+	if err != nil {
+		t.Fatalf("err = %v, want nil (header must be ignored)", err)
+	}
+	if resp.Content != "x" {
+		t.Fatalf("content = %q, want %q", resp.Content, "x")
+	}
+}
+
+func TestLiteLLMHashDeploymentIDAccepted(t *testing.T) {
+	// Regression test for the live failure: real LiteLLM (1.98.0) returns a
+	// 64-hex deployment hash in x-litellm-model-id. The guard must accept it
+	// when the body model matches the expected prefix. Fails on the old code
+	// (which prefix-matched the header and returned ErrSubstituted).
+	const hashID = "527fa7e8c1d94b6a8e2f0a3c5d7b9e1f2a4c6d8e0b1f3a5c7d9e1b3a5c7d9001"
+	srv := httptest.NewServer(okHandler(
+		`{"model":"gpt-5.6-luna","choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`,
+		map[string]string{"x-litellm-model-id": hashID}))
+	defer srv.Close()
+	client := New(&http.Client{}, srv.URL, "k", 4, testLogger(t))
+	resp, err := client.Chat(context.Background(), ChatRequest{Model: "m", ExpectedModelPrefixes: []string{"gpt-5.6-"}})
+	if err != nil {
+		t.Fatalf("err = %v, want nil (hash deployment id must be accepted)", err)
+	}
+	if resp.ModelReturned != "gpt-5.6-luna" {
+		t.Fatalf("model = %q, want %q", resp.ModelReturned, "gpt-5.6-luna")
+	}
+}
+
+func TestLiteLLMBodyMismatchStillRejectedWithHashHeader(t *testing.T) {
+	// True positives survive: a body model that does not match the expected
+	// prefix still hard-fails even when a hash deployment id is present.
+	const hashID = "da890bcf1d94b6a8e2f0a3c5d7b9e1f2a4c6d8e0b1f3a5c7d9e1b3a5c7d9002"
+	srv := httptest.NewServer(okHandler(
+		`{"model":"other-model-1","choices":[{"message":{"content":"x"},"finish_reason":"stop"}],"usage":{}}`,
+		map[string]string{"x-litellm-model-id": hashID}))
+	defer srv.Close()
+	client := New(&http.Client{}, srv.URL, "k", 4, testLogger(t))
 	_, err := client.Chat(context.Background(), ChatRequest{Model: "m", ExpectedModelPrefixes: []string{"gpt-x-"}})
 	if !errors.Is(err, ErrSubstituted) {
 		t.Fatalf("err = %v, want ErrSubstituted", err)
+	}
+	var sub *SubstitutionError
+	if !errors.As(err, &sub) {
+		t.Fatal("want *SubstitutionError")
+	}
+	if sub.Returned != "other-model-1" {
+		t.Fatalf("returned = %q, want body model %q", sub.Returned, "other-model-1")
+	}
+}
+
+func TestLiteLLMMissingBodyModelFailsClosed(t *testing.T) {
+	srv := httptest.NewServer(okHandler(
+		`{"choices":[{"message":{"content":"x"},"finish_reason":"stop"}],"usage":{}}`, nil))
+	defer srv.Close()
+	client := New(&http.Client{}, srv.URL, "k", 4, testLogger(t))
+	_, err := client.Chat(context.Background(), ChatRequest{Model: "m", ExpectedModelPrefixes: []string{"gpt-x-"}})
+	if !errors.Is(err, ErrSubstituted) {
+		t.Fatalf("err = %v, want ErrSubstituted", err)
+	}
+}
+
+func TestLiteLLMBaseURLNormalization(t *testing.T) {
+	const wantPath = "/v1/chat/completions"
+	for _, tc := range []struct {
+		name string
+		base string
+	}{
+		{"no suffix", ""},
+		{"v1 suffix", "/v1"},
+		{"v1 suffix trailing slash", "/v1/"},
+		{"trailing slash", "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"model":"m","choices":[],"usage":{}}`)
+			}))
+			defer srv.Close()
+			client := New(&http.Client{}, srv.URL+tc.base, "k", 4, testLogger(t))
+			if _, err := client.Chat(context.Background(), ChatRequest{Model: "m"}); err != nil {
+				t.Fatalf("Chat: %v", err)
+			}
+			if gotPath != wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, wantPath)
+			}
+		})
 	}
 }
 

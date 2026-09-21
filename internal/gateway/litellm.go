@@ -16,6 +16,9 @@ import (
 )
 
 // LiteLLM is an OpenAI-compatible chat client over POST {base}/v1/chat/completions.
+// The canonical base URL has no "/v1" suffix (e.g. "http://host:4000"); a base
+// with a single trailing "/v1" (e.g. "http://host:4000/v1") is also accepted
+// and normalised to the canonical form.
 type LiteLLM struct {
 	client *http.Client
 	base   string
@@ -33,7 +36,7 @@ func New(client *http.Client, baseURL, apiKey string, maxConcurrent int, log log
 	}
 	return &LiteLLM{
 		client: client,
-		base:   strings.TrimRight(baseURL, "/"),
+		base:   normalizeBase(baseURL),
 		key:    apiKey,
 		sem:    make(chan struct{}, maxConcurrent),
 		log:    log,
@@ -123,6 +126,7 @@ func (l *LiteLLM) Chat(ctx context.Context, req ChatRequest) (resp ChatResponse,
 		ModelReturned:    parsed.Model,
 		PromptTokens:     parsed.Usage.PromptTokens,
 		CompletionTokens: parsed.Usage.CompletionTokens,
+		LiteLLMModelID:   httpResp.Header.Get("x-litellm-model-id"),
 	}
 	if len(parsed.Choices) > 0 {
 		resp.Content = parsed.Choices[0].Message.Content
@@ -134,20 +138,41 @@ func (l *LiteLLM) Chat(ctx context.Context, req ChatRequest) (resp ChatResponse,
 		}
 	}
 
-	// Substitution check: response model and (advisory A6) the
-	// x-litellm-model-id header must match one of the expected prefixes.
+	// Substitution check: the response body "model" field is the sole authority
+	// for substitution detection, matched against the expected prefixes.
+	// The x-litellm-model-id header is NOT compared to a model name: real
+	// LiteLLM returns a deployment identifier (a 64-hex hash) there, never a
+	// model name, so comparing it causes a false positive on every real call.
+	// It is retained only as diagnostic metadata below. A genuine body-model
+	// mismatch still hard-fails with SubstitutionError / ErrSubstituted.
 	if len(req.ExpectedModelPrefixes) > 0 {
+		if parsed.Model == "" {
+			// Fail closed: with no body model we cannot prove the provider
+			// returned the requested model, so treat it as substituted.
+			errClass = "substituted"
+			return resp, &SubstitutionError{Response: resp, Returned: parsed.Model}
+		}
 		if !matchesAnyPrefix(parsed.Model, req.ExpectedModelPrefixes) {
 			errClass = "substituted"
 			return resp, &SubstitutionError{Response: resp, Returned: parsed.Model}
 		}
-		if headerID := httpResp.Header.Get("x-litellm-model-id"); headerID != "" &&
-			!matchesAnyPrefix(headerID, req.ExpectedModelPrefixes) {
-			errClass = "substituted"
-			return resp, &SubstitutionError{Response: resp, Returned: headerID}
+		if headerID := httpResp.Header.Get("x-litellm-model-id"); headerID != "" {
+			l.log.Debug("gateway litellm deployment id",
+				"model", parsed.Model,
+				"litellm_model_id", headerID,
+			)
 		}
 	}
 	return resp, nil
+}
+
+// normalizeBase strips trailing slashes and a single trailing "/v1" segment
+// so both "http://host:4000" and "http://host:4000/v1" map to the canonical
+// base "http://host:4000" before "/v1/chat/completions" is appended.
+func normalizeBase(baseURL string) string {
+	base := strings.TrimRight(baseURL, "/")
+	base = strings.TrimSuffix(base, "/v1")
+	return strings.TrimRight(base, "/")
 }
 
 func matchesAnyPrefix(value string, prefixes []string) bool {

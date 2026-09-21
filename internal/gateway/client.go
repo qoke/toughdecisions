@@ -43,6 +43,10 @@ type ChatResponse struct {
 	CompletionTokens int
 	CostUSD          *float64
 	LatencyMs        int64
+	// LiteLLMModelID carries the x-litellm-model-id header value: on real
+	// LiteLLM a 64-hex deployment hash, never a model name. Diagnostic only;
+	// substitution checks must use ModelReturned (the body model).
+	LiteLLMModelID string
 }
 
 // Sentinel errors; wrap with %w and branch with errors.Is.
