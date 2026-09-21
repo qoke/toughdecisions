@@ -48,9 +48,12 @@ func (db *DB) GetPack(id string) (*Pack, error) {
 }
 
 // Active returns the pack with status 'active', or sql.ErrNoRows.
+// Invariant: at most one pack is active. When legacy rows leave more than
+// one active pack, the newest (created_at, id) wins deterministically.
 func (db *DB) Active() (*Pack, error) {
 	row := db.db.QueryRow(`SELECT id, created_at, status, seats_json, prompt_pack_hash,
-		notes, published_from_run_id, activated_at FROM packs WHERE status = 'active' LIMIT 1`)
+		notes, published_from_run_id, activated_at FROM packs WHERE status = 'active'
+		ORDER BY created_at DESC, id DESC LIMIT 1`)
 	return scanPack(row)
 }
 

@@ -71,7 +71,7 @@ func (db *DB) PublishAtomic(seed PackTxSeed) (*PublishAtomicResult, error) {
 	res := &PublishAtomicResult{}
 	err := db.WithTx(context.Background(), func(tx *sql.Tx) error {
 		activeID := ""
-		if row := tx.QueryRow(`SELECT id FROM packs WHERE status='active' LIMIT 1`); row != nil {
+		if row := tx.QueryRow(`SELECT id FROM packs WHERE status='active' ORDER BY created_at DESC, id DESC LIMIT 1`); row != nil {
 			_ = row.Scan(&activeID)
 		}
 		res.ActiveID = activeID
@@ -80,7 +80,10 @@ func (db *DB) PublishAtomic(seed PackTxSeed) (*PublishAtomicResult, error) {
 				return fmt.Errorf("store: publish retired: %w", err)
 			}
 			if activeID != "" {
-				if _, err := tx.Exec(`UPDATE packs SET status='previous' WHERE id=?`, activeID); err != nil {
+				// Demote every active row (not just the newest): a legacy
+				// store may hold more than one, and the single-active
+				// invariant must be restored in the same transaction.
+				if _, err := tx.Exec(`UPDATE packs SET status='previous' WHERE status='active'`); err != nil {
 					return fmt.Errorf("store: publish demote: %w", err)
 				}
 			}
