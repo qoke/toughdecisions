@@ -33,8 +33,12 @@ func TestGradeInsertGet(t *testing.T) {
 			t.Fatalf("round-trip mismatch: %+v", got)
 		}
 	}
-	if _, err := db.InsertGrade(&Grade{CacheKey: "grade-ck1", ResponseID: "resp2"}); err == nil {
-		t.Fatal("duplicate cache_key: want error")
+	reused, err := db.InsertGrade(&Grade{CacheKey: "grade-ck1", ResponseID: "resp2"})
+	if err != nil {
+		t.Fatalf("duplicate cache_key reuse: %v", err)
+	}
+	if reused.ID != g.ID || reused.ResponseID != "resp1" {
+		t.Fatalf("reuse gave %+v; want the pre-existing row", reused)
 	}
 	if _, err := db.GetGrade("missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("GetGrade missing err = %v", err)

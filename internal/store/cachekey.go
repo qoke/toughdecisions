@@ -8,9 +8,10 @@ import (
 
 // ResponseCacheKey implements DEVELOPMENT_PLAN.md §12: the harness response
 // cache key is sha256(seat, config_hash, prompt_pack_hash, input_hash,
-// bundle_hash, repetition). The grade cache in §11 reuses this helper with
-// (response_id, grader config_hash, rubric_hash); it is sensitive to all of
-// those inputs by construction.
+// bundle_hash, repetition). The grade cache key (§11) is a separate formula
+// in grading.GradeCacheKey over (response_id, grader config_hash,
+// rubric_hash); it does not call this helper. Both keys are sensitive to
+// all of their inputs by construction.
 //
 // Concurrent same-key inserts must resolve deterministically: callers that
 // race on the same key must reuse the existing row (INSERT ... ON CONFLICT
