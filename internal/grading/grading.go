@@ -1,0 +1,34 @@
+// Package grading implements blind absolute, pairwise, coverage, and
+// calibration grading. Graders never see model names or prior results:
+// blind material is render.Markdown of the parsed (or raw) response plus
+// the role name only.
+package grading
+
+import (
+	"fmt"
+
+	"github.com/qoke/toughdecisions/internal/config"
+	"github.com/qoke/toughdecisions/internal/gateway"
+	"github.com/qoke/toughdecisions/internal/store"
+)
+
+// Grader aliases store.GraderConfig so callers pass repository rows directly.
+type Grader = store.GraderConfig
+
+// Service owns grading against one DB, gateway client, and config.
+type Service struct {
+	db  *store.DB
+	gw  gateway.Client
+	cfg *config.Config
+}
+
+// NewService builds a Service. All arguments are required.
+func NewService(db *store.DB, gw gateway.Client, cfg *config.Config) *Service {
+	return &Service{db: db, gw: gw, cfg: cfg}
+}
+
+func strPtr(s string) *string { return &s }
+
+func errf(format string, args ...any) error {
+	return fmt.Errorf("grading: "+format, args...)
+}
