@@ -166,6 +166,10 @@ func Active(db *store.DB) (*Pack, error) {
 
 // Publish creates a new active pack: the new pack becomes active, the
 // previous active becomes previous, and any older previous becomes retired.
+//
+// The status swap and the new row happen in ONE store transaction via
+// PublishAtomic, the same transaction the harness publish step reuses to
+// add baselines and natural bundles atomically.
 func Publish(db *store.DB, seats map[Seat]SeatConfig, fromRunID string) (*Pack, error) {
 	if len(seats) != len(AllSeats) {
 		return nil, fmt.Errorf("pack: publish needs %d seats, got %d", len(AllSeats), len(seats))
@@ -175,27 +179,28 @@ func Publish(db *store.DB, seats map[Seat]SeatConfig, fromRunID string) (*Pack, 
 			return nil, fmt.Errorf("pack: publish missing seat %q", seat)
 		}
 	}
-	var out *Pack
-	// Demote any older previous packs to retired, then active -> previous.
-	previous, err := db.PacksByStatus(StatusPrevious)
+	seatsJSON, err := json.Marshal(seats)
+	if err != nil {
+		return nil, fmt.Errorf("pack: encode seats: %w", err)
+	}
+	var runID *string
+	if fromRunID != "" {
+		runID = &fromRunID
+	}
+	res, err := db.PublishAtomic(store.PackTxSeed{
+		NewStatus: StatusActive,
+		NewSeats:  string(seatsJSON),
+		NewHash:   prompts.PromptPackHash(),
+		NewRunID:  runID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range previous {
-		if err := db.SetStatus(p.ID, StatusRetired); err != nil {
-			return nil, err
-		}
-	}
-	if cur, err := db.Active(); err == nil {
-		if err := db.SetStatus(cur.ID, StatusPrevious); err != nil {
-			return nil, err
-		}
-	}
-	out, err = insertPack(db, seats, StatusActive, fromRunID)
+	row, err := db.GetPack(res.CreatedID)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return toPack(row)
 }
 
 // Rollback swaps active and previous: previous becomes active, active
