@@ -306,7 +306,7 @@ func (r *Runner) genComparePairs(ctx context.Context, runID string, seat pack.Se
 		cr, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: candCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: fresh, ResponseFamily: candCfg.Family,
+			RunID: runID, Fresh: fresh,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: candidate case %q: %w", cc.Case.CaseKey, err)
@@ -314,7 +314,7 @@ func (r *Runner) genComparePairs(ctx context.Context, runID string, seat pack.Se
 		ir, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: incCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: fresh, ResponseFamily: incCfg.Family,
+			RunID: runID, Fresh: fresh,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: incumbent case %q: %w", cc.Case.CaseKey, err)
@@ -417,7 +417,7 @@ func (r *Runner) rerunFragility(ctx context.Context, runID string, res *CompareR
 		cr, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: candCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: true, ResponseFamily: candCfg.Family,
+			RunID: runID, Fresh: true,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: fragility candidate case %q: %w", cc.Case.CaseKey, err)
@@ -425,7 +425,7 @@ func (r *Runner) rerunFragility(ctx context.Context, runID string, res *CompareR
 		ir, err := r.GenerateResponse(ctx, GenRequest{
 			Seat: seat, SeatCfg: incCfg, Input: cc.Input,
 			InputHash: InputHashFor(cc.Input), Bundle: cc.Bundle,
-			RunID: runID, Fresh: true, ResponseFamily: incCfg.Family,
+			RunID: runID, Fresh: true,
 		})
 		if err != nil {
 			return fmt.Errorf("harness: fragility incumbent case %q: %w", cc.Case.CaseKey, err)
