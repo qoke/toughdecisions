@@ -68,7 +68,7 @@ func TestParseLenientRejectsMalformed(t *testing.T) {
 }
 
 func TestSchemasAreValidJSON(t *testing.T) {
-	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema} {
+	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema, "absolute": AbsoluteJSONSchema} {
 		var v any
 		if err := json.Unmarshal([]byte(s), &v); err != nil {
 			t.Fatalf("%s schema invalid: %v", name, err)
@@ -93,7 +93,7 @@ func TestParseLenientJudge(t *testing.T) {
 // properties, and all combinators, so depth coverage is structural, not
 // limited to the top level.
 func TestSchemasStrictModeConformant(t *testing.T) {
-	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema} {
+	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema, "absolute": AbsoluteJSONSchema} {
 		var v any
 		if err := json.Unmarshal([]byte(s), &v); err != nil {
 			t.Fatalf("%s schema invalid: %v", name, err)
@@ -159,7 +159,7 @@ func itoa(i int) string {
 // urgent_danger.required=["present"] while properties has present+caution)
 // fails this offline instead of 400ing every real call.
 func TestSchemasStrictModeRequiresAllProperties(t *testing.T) {
-	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema} {
+	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema, "absolute": AbsoluteJSONSchema} {
 		var v any
 		if err := json.Unmarshal([]byte(s), &v); err != nil {
 			t.Fatalf("%s schema invalid: %v", name, err)
@@ -224,10 +224,10 @@ func assertRequiredSuperset(t *testing.T, schemaName, path string, v any) {
 // calibration reversals (15/33 live responses).
 func TestParseLenientGradeRejectsMissingOrPartialScores(t *testing.T) {
 	for _, raw := range []string{
-		`{"supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
-		`{"overall_assessment": "fine", "supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
-		`{"scores": {"grounding_and_calibration": 3}, "supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
-		`{"scores": {}, "supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"supporting_passages": {}, "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"overall_assessment": "fine", "supporting_passages": {}, "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"scores": {"grounding_and_calibration": 3}, "supporting_passages": {}, "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"scores": {}, "supporting_passages": {}, "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
 	} {
 		if grade, ok := ParseLenient[AbsoluteGrade](raw); ok {
 			t.Fatalf("ParseLenient[AbsoluteGrade] accepted %s: %+v", raw, grade)

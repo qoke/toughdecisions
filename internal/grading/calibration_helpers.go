@@ -96,7 +96,8 @@ func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptanc
 		if err != nil {
 			return nil, 0, err
 		}
-		content, err := s.chat(ctx, grader, msgs)
+		rf := s.graderResponseFormat(grader.Model)
+		content, err := s.chatWithFormat(ctx, grader, msgs, rf)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -104,7 +105,7 @@ func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptanc
 		if !ok {
 			retry := append(append([]gateway.Message{}, msgs...),
 				gateway.Message{Role: "user", Content: "Return only the JSON object."})
-			content, err = s.chat(ctx, grader, retry)
+			content, err = s.chatWithFormat(ctx, grader, retry, rf)
 			if err != nil {
 				return nil, 0, err
 			}

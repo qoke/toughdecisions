@@ -170,6 +170,41 @@ const judgeJSONSchemaTmpl = `{
   "additionalProperties": false
 }`
 
+// absoluteJSONSchemaTmpl is the raw template for the absolute-grader output
+// JSON Schema. AbsoluteJSONSchema is its strict-mode-normalized form; the
+// grading service sends it as the response_format on grader calls whose
+// model supports json_schema, mirroring the view/judge mechanism.
+const absoluteJSONSchemaTmpl = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "absolute",
+  "type": "object",
+  "required": ["scores", "supporting_passages", "notes_check"],
+  "properties": {
+    "scores": {"type": "object",
+      "required": ["grounding_and_calibration", "context_and_values_fidelity", "decision_insight", "practical_robustness", "role_execution"],
+      "properties": {
+        "grounding_and_calibration": {"type": "integer"},
+        "context_and_values_fidelity": {"type": "integer"},
+        "decision_insight": {"type": "integer"},
+        "practical_robustness": {"type": "integer"},
+        "role_execution": {"type": "integer"}
+      }},
+    "supporting_passages": {"type": "array", "items": {"type": "object",
+      "required": ["passage", "assessment"],
+      "properties": {"passage": {"type": "string"}, "assessment": {"type": "string"}}}},
+    "notes_check": {"type": "object",
+      "required": ["noticed", "missed", "beyond_notes"],
+      "properties": {
+        "noticed": {"type": "array", "items": {"type": "string"}},
+        "missed": {"type": "array", "items": {"type": "string"}},
+        "beyond_notes": {"type": "array", "items": {"type": "string"}}}},
+    "flags": {"type": "array", "items": {"type": "object",
+      "required": ["type"],
+      "properties": {"type": {"type": "string"}, "passage": {"type": "string"}, "violated": {"type": "string"}}}}
+  },
+  "additionalProperties": false
+}`
+
 // ViewJSONSchema is the strict-mode-normalized View output JSON Schema:
 // every object at every nesting depth carries "additionalProperties": false
 // and lists every property in "required", as required by OpenAI-family
@@ -185,6 +220,16 @@ var ViewJSONSchema = mustStrictNormalize(viewJSONSchemaTmpl)
 // JudgeJSONSchema is the strict-mode-normalized Judge output JSON Schema.
 // See ViewJSONSchema for the invariant.
 var JudgeJSONSchema = mustStrictNormalize(judgeJSONSchemaTmpl)
+
+// AbsoluteJSONSchema is the strict-mode-normalized absolute-grader output
+// JSON Schema. The grading service sends it as the response_format on
+// grader calls whose model supports json_schema, mirroring the view/judge
+// mechanism. Scores stay flat 0-4 integers (no wrapped {"score": n} form),
+// supporting_passages is always an array of {passage, assessment} objects,
+// notes_check is always the three-list object: the schema-conformant shape.
+// Previously-optional fields (flags members, notes lists) are plain types
+// with no minLength: models emit "" / [] when absent.
+var AbsoluteJSONSchema = mustStrictNormalize(absoluteJSONSchemaTmpl)
 
 // mustStrictNormalize parses a raw schema template and enforces the
 // OpenAI strict-mode contract on every object node recursively (root,

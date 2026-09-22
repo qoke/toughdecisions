@@ -41,7 +41,11 @@ func RubricCriteria() []string {
 // graderInputShapes lists the input shapes real grader models emit (plus the
 // originally-assumed one, kept first for compatibility). Models routinely wrap
 // each 0-4 score one level deeper, as {"criterion": {"score": n, ...}}, instead
-// of the assumed flat {"criterion": n}.
+// of the assumed flat {"criterion": n}; pre-schema grader calls also
+// improvised container names (see the evidence2 provider log). Every entry
+// here is attested by a real payload: root, assessment, evaluation,
+// rubric_scores, rubric_evaluation, and why_scores containers all appear in
+// live responses.
 var graderInputShapes = []struct{ scores, passages, notes string }{
 	{"scores", "supporting_passages", "notes_check"},
 	{"scores", "supporting_passages", "acceptance_notes"},
@@ -49,6 +53,13 @@ var graderInputShapes = []struct{ scores, passages, notes string }{
 	{"criteria", "supporting_passages", "acceptance_notes"},
 	{"assessment", "supporting_passages", "acceptance_notes"},
 	{"scores", "supporting_passages", "notes"},
+	{"rubric_scores", "supporting_passages", "acceptance_notes"},
+	{"rubric_scores", "supporting_passages", "notes_check"},
+	{"rubric_evaluation", "supporting_passages", "acceptance_notes"},
+	{"evaluation", "supporting_passages", "acceptance_notes"},
+	{"why_scores", "supporting_passages", "acceptance_notes"},
+	{"", "supporting_passages", "acceptance_notes"},
+	{"", "supporting_passages", "notes_check"},
 }
 
 // parseAbsoluteGrade parses a raw grader response into the strict
@@ -97,19 +108,33 @@ func parseAbsoluteGrade(raw string) (schema.AbsoluteGrade, bool) {
 
 // decodeAbsoluteGrade attempts one container-shape mapping of the grader
 // payload and reports whether the result is a valid absolute grade.
+// An empty scoresKey means the five criteria live at the payload root.
 func decodeAbsoluteGrade(root map[string]json.RawMessage, scoresKey, passagesKey, notesKey string) (schema.AbsoluteGrade, bool) {
 	var zero schema.AbsoluteGrade
-	raw, ok := root[scoresKey]
-	if !ok {
-		return zero, false
-	}
-	scores, ok := decodeScores(raw)
-	if !ok {
-		return zero, false
+	var scores map[string]int
+	if scoresKey == "" {
+		var ok bool
+		scores, ok = decodeScoresAtRoot(root)
+		if !ok {
+			return zero, false
+		}
+	} else {
+		raw, ok := root[scoresKey]
+		if !ok {
+			return zero, false
+		}
+		var ok2 bool
+		scores, ok2 = decodeScores(raw)
+		if !ok2 {
+			return zero, false
+		}
 	}
 	passages, ok := decodePassages(root[passagesKey])
 	if !ok {
 		return zero, false
+	}
+	if scoresKey == "" {
+		harvestRootPassages(root, passages)
 	}
 	notes, ok := decodeNotes(root[notesKey])
 	if !ok {
@@ -125,39 +150,224 @@ func decodeAbsoluteGrade(root map[string]json.RawMessage, scoresKey, passagesKey
 			grade.MostConsequentialWeakness = &mcw
 		}
 	}
+	if grade.MostConsequentialWeakness == nil {
+		grade.MostConsequentialWeakness = harvestWeakness(root)
+	}
 	if err := decodeFlags(root["flags"], &grade); err != nil {
 		return zero, false
 	}
 	return grade, true
 }
 
-// decodeScores accepts either {"criterion": 3} or {"criterion": {"score": 3,
-// ...}} and requires one valid 0-4 score for each of the five rubric criteria.
-func decodeScores(raw json.RawMessage) (map[string]int, bool) {
-	if len(raw) == 0 {
-		return nil, false
+// harvestWeakness collects a most-consequential weakness from the variant
+// keys real models emit ("weaknesses" list, "weakness_summary" string,
+// "overall" summary, or score_justifications), so the persisted grade keeps
+// the signal even when the key name varies. Absent variants yield nil.
+func harvestWeakness(root map[string]json.RawMessage) *struct {
+	Passage     string `json:"passage"`
+	Explanation string `json:"explanation"`
+} {
+	if raw, ok := root["weaknesses"]; ok {
+		var list []string
+		if err := json.Unmarshal(raw, &list); err == nil {
+			for _, w := range list {
+				if strings.TrimSpace(w) != "" {
+					return &struct {
+						Passage     string `json:"passage"`
+						Explanation string `json:"explanation"`
+					}{Passage: w, Explanation: w}
+				}
+			}
+		}
 	}
-	var flat map[string]int
-	if err := json.Unmarshal(raw, &flat); err == nil && validScores(flat) {
-		return flat, true
+	for _, key := range []string{"weakness_summary", "overall_assessment", "overall_notes", "overall_note"} {
+		if raw, ok := root[key]; ok {
+			var s string
+			if err := json.Unmarshal(raw, &s); err == nil && strings.TrimSpace(s) != "" {
+				return &struct {
+					Passage     string `json:"passage"`
+					Explanation string `json:"explanation"`
+				}{Passage: s, Explanation: s}
+			}
+		}
 	}
-	var wrapped map[string]struct {
-		Score *int `json:"score"`
+	if raw, ok := root["overall"]; ok {
+		var overall struct {
+			Summary string `json:"summary"`
+		}
+		if err := json.Unmarshal(raw, &overall); err == nil && strings.TrimSpace(overall.Summary) != "" {
+			return &struct {
+				Passage     string `json:"passage"`
+				Explanation string `json:"explanation"`
+			}{Passage: overall.Summary, Explanation: overall.Summary}
+		}
 	}
-	if err := json.Unmarshal(raw, &wrapped); err != nil {
-		return nil, false
-	}
-	scores := make(map[string]int, len(wrapped))
-	for name, entry := range wrapped {
-		if entry.Score == nil {
+	return nil
+}
+
+// decodeScoresAtRoot decodes scores when the five criteria live at the
+// payload root (the smoke-d selection-a first-response shape): each root
+// key naming a criterion holds {"score": n, ...} (or a flat n). Extra root
+// keys (flags, overall_assessment) are ignored; the five must validate.
+func decodeScoresAtRoot(root map[string]json.RawMessage) (map[string]int, bool) {
+	sub := make(map[string]json.RawMessage, len(rubricCriteria))
+	for _, name := range rubricCriteria {
+		raw, ok := root[name]
+		if !ok {
 			return nil, false
 		}
-		scores[name] = *entry.Score
+		sub[name] = raw
+	}
+	scores := make(map[string]int, len(rubricCriteria))
+	for name, raw := range sub {
+		var flat int
+		if err := json.Unmarshal(raw, &flat); err == nil {
+			scores[name] = flat
+			continue
+		}
+		var wrapped struct {
+			Score          *int   `json:"score"`
+			SupportingPass string `json:"supporting_passage"`
+			Assessment     string `json:"assessment"`
+			Weakness       string `json:"weakness"`
+		}
+		if err := json.Unmarshal(raw, &wrapped); err != nil || wrapped.Score == nil {
+			return nil, false
+		}
+		scores[name] = *wrapped.Score
 	}
 	if !validScores(scores) {
 		return nil, false
 	}
 	return scores, true
+}
+
+// harvestRootPassages collects supporting_passage/assessment pairs carried
+// inside root-level per-criterion objects (the smoke-d root-wrapped shape),
+// so that shape still yields evidence passages.
+func harvestRootPassages(root map[string]json.RawMessage, passages map[string]string) {
+	for _, name := range rubricCriteria {
+		raw, ok := root[name]
+		if !ok {
+			continue
+		}
+		var wrapped struct {
+			SupportingPass string `json:"supporting_passage"`
+			Assessment     string `json:"assessment"`
+			Weakness       string `json:"weakness"`
+		}
+		if err := json.Unmarshal(raw, &wrapped); err != nil {
+			continue
+		}
+		passage := strings.TrimSpace(wrapped.SupportingPass)
+		assessment := firstNonEmpty(wrapped.Assessment, wrapped.Weakness)
+		if passage == "" || strings.TrimSpace(assessment) == "" {
+			continue
+		}
+		passages[passage] = assessment
+	}
+}
+
+// decodeScores accepts flat ({"criterion": 3}), wrapped ({"criterion":
+// {"score": 3, ...}}), or array ([{"name": "criterion", "score": 3}]) score
+// containers, and requires one valid 0-4 score for each of the five rubric
+// criteria. Criterion keys are normalized (case, spaces, and the
+// unambiguous truncations real models emit, e.g. "grounding_calibration"),
+// so a misspelled-but-unambiguous key still grades instead of failing.
+func decodeScores(raw json.RawMessage) (map[string]int, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var flat map[string]int
+	if err := json.Unmarshal(raw, &flat); err == nil {
+		if norm, ok := normalizeScoreKeys(flat); ok && validScores(norm) {
+			return norm, true
+		}
+	}
+	var wrapped map[string]struct {
+		Score *int `json:"score"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil {
+		scores := make(map[string]int, len(wrapped))
+		for name, entry := range wrapped {
+			if entry.Score == nil {
+				return nil, false
+			}
+			norm, ok := normalizeCriterionKey(name)
+			if !ok {
+				return nil, false
+			}
+			scores[norm] = *entry.Score
+		}
+		if !validScores(scores) {
+			return nil, false
+		}
+		return scores, true
+	}
+	var listed []struct {
+		Name  string `json:"name"`
+		Score *int   `json:"score"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return nil, false
+	}
+	scores := make(map[string]int, len(listed))
+	for _, entry := range listed {
+		if entry.Score == nil {
+			return nil, false
+		}
+		norm, ok := normalizeCriterionKey(entry.Name)
+		if !ok {
+			return nil, false
+		}
+		scores[norm] = *entry.Score
+	}
+	if !validScores(scores) {
+		return nil, false
+	}
+	return scores, true
+}
+
+// normalizeScoreKeys normalizes every key of a flat scores map. A collision
+// (two keys normalizing to one criterion) collapses the map below five
+// entries and fails validScores downstream — never silently merged.
+func normalizeScoreKeys(flat map[string]int) (map[string]int, bool) {
+	out := make(map[string]int, len(flat))
+	for name, score := range flat {
+		norm, ok := normalizeCriterionKey(name)
+		if !ok {
+			return nil, false
+		}
+		out[norm] = score
+	}
+	return out, true
+}
+
+// normalizeCriterionKey maps a criterion key to its canonical form by its
+// distinctive word, tolerating case, spacing, and unambiguous truncation
+// ("Grounding and calibration", "grounding_calibration"). An unrecognized
+// key reports false and the payload is rejected, never coerced.
+func normalizeCriterionKey(name string) (string, bool) {
+	lower := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(name), " ", "_"))
+	for _, canonical := range rubricCriteria {
+		if lower == canonical {
+			return canonical, true
+		}
+	}
+	switch {
+	case strings.Contains(lower, "grounding"):
+		return "grounding_and_calibration", true
+	case strings.Contains(lower, "context") || strings.Contains(lower, "fidelity") || strings.Contains(lower, "values"):
+		return "context_and_values_fidelity", true
+	case strings.Contains(lower, "insight") || strings.Contains(lower, "decision"):
+		return "decision_insight", true
+	case strings.Contains(lower, "robustness") || strings.Contains(lower, "practical"):
+		return "practical_robustness", true
+	case strings.Contains(lower, "role") || strings.Contains(lower, "execution"):
+		return "role_execution", true
+	default:
+		return "", false
+	}
 }
 
 // validScores requires exactly the five rubric criteria, each 0-4.
@@ -175,11 +385,13 @@ func validScores(scores map[string]int) bool {
 }
 
 // decodePassages accepts the array form real models emit ([{passage,
-// assessment}, ...]) and the originally-assumed map form
-// ({"criterion": "passage"}). An absent field yields no passages; a present
-// but malformed entry is a hard failure, so a broken payload is still caught.
-// In both branches every passage key and assessment value must be non-empty
-// after trimming: an empty string is malformed, not evidence.
+// assessment}, ...]), the bare string array real retries emit (each string
+// is both the quoted passage and its own evidence note), and the
+// originally-assumed map form ({"criterion": "passage"}). An absent field
+// yields no passages; a present but malformed entry is a hard failure, so a
+// broken payload is still caught.
+// In every branch each passage and assessment must be non-empty after
+// trimming: an empty string is malformed, not evidence.
 func decodePassages(raw json.RawMessage) (map[string]string, bool) {
 	if len(raw) == 0 {
 		return map[string]string{}, true
@@ -196,21 +408,48 @@ func decodePassages(raw json.RawMessage) (map[string]string, bool) {
 		}
 		return asMap, true
 	}
+	var stringsOnly []string
+	if err := json.Unmarshal(raw, &stringsOnly); err == nil {
+		passages := make(map[string]string, len(stringsOnly))
+		for _, s := range stringsOnly {
+			if strings.TrimSpace(s) == "" {
+				return nil, false
+			}
+			passages[s] = s
+		}
+		return passages, true
+	}
 	var entries []struct {
 		Passage    string `json:"passage"`
 		Assessment string `json:"assessment"`
+		WhyHelps   string `json:"why_it_helps"`
+		Response   string `json:"response"`
+		Issue      string `json:"issue"`
+		Quote      string `json:"quote"`
 	}
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil, false
 	}
 	passages := make(map[string]string, len(entries))
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.Passage) == "" || strings.TrimSpace(entry.Assessment) == "" {
+		passage := firstNonEmpty(entry.Passage, entry.Response, entry.Quote)
+		assessment := firstNonEmpty(entry.Assessment, entry.WhyHelps, entry.Issue)
+		if strings.TrimSpace(passage) == "" || strings.TrimSpace(assessment) == "" {
 			return nil, false
 		}
-		passages[entry.Passage] = entry.Assessment
+		passages[passage] = assessment
 	}
 	return passages, true
+}
+
+// firstNonEmpty returns the first non-blank string, or "".
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // decodeNotes accepts the three-list object and the string/array forms models
@@ -246,22 +485,47 @@ func decodeNotes(raw json.RawMessage) (struct {
 
 // decodeFlags accepts the array of flag objects as well as the bare string
 // list some models return, and rejects a present-but-malformed flag list.
+// Object flags may carry the type under "type" (schema-conformant) or the
+// "flag_type" alias real retries emit; quote/detail/why aliases are
+// preserved into the passage slot.
 func decodeFlags(raw json.RawMessage, grade *schema.AbsoluteGrade) error {
 	if len(raw) == 0 {
 		return nil
 	}
 	var objs []struct {
-		Type     string `json:"type"`
-		Passage  string `json:"passage"`
-		Violated string `json:"violated"`
+		Type       string `json:"type"`
+		FlagType   string `json:"flag_type"`
+		Passage    string `json:"passage"`
+		Quote      string `json:"quote"`
+		QuotedText string `json:"quoted_text"`
+		Detail     string `json:"detail"`
+		Violated   string `json:"violated"`
+		Why        string `json:"why"`
+		WhyFlagged string `json:"why_flagged"`
+		Severity   string `json:"severity"`
 	}
 	if err := json.Unmarshal(raw, &objs); err == nil {
-		for _, o := range objs {
-			if o.Type == "" {
+		for i := range objs {
+			if objs[i].Type == "" {
+				objs[i].Type = objs[i].FlagType
+			}
+			if objs[i].Type == "" {
 				return errMissingFlagType
 			}
+			if objs[i].Passage == "" {
+				objs[i].Passage = firstNonEmpty(objs[i].Quote, objs[i].QuotedText, objs[i].Detail)
+			}
+			if objs[i].Violated == "" {
+				objs[i].Violated = firstNonEmpty(objs[i].Why, objs[i].WhyFlagged, objs[i].Severity)
+			}
 		}
-		grade.Flags = objs
+		for _, o := range objs {
+			grade.Flags = append(grade.Flags, struct {
+				Type     string `json:"type"`
+				Passage  string `json:"passage"`
+				Violated string `json:"violated"`
+			}{Type: o.Type, Passage: o.Passage, Violated: o.Violated})
+		}
 		return nil
 	}
 	var names []string
@@ -521,7 +785,7 @@ func (s *Service) insertGrade(resp *store.Response, grader *Grader, rubricHash, 
 // once. Any error (including the retry) is returned without further
 // retries; non-grader calls must not use this helper.
 func (s *Service) graderChat(ctx context.Context, grader *Grader, msgs []gateway.Message) (string, error) {
-	content, err := s.chat(ctx, grader, msgs)
+	content, err := s.absoluteChat(ctx, grader, msgs)
 	if err != nil {
 		return "", err
 	}
@@ -530,20 +794,60 @@ func (s *Service) graderChat(ctx context.Context, grader *Grader, msgs []gateway
 	}
 	retry := append(append([]gateway.Message{}, msgs...),
 		gateway.Message{Role: "user", Content: "Return only the JSON object."})
-	return s.chat(ctx, grader, retry)
+	return s.absoluteChat(ctx, grader, retry)
 }
 
-// chat performs a single gateway call with the grader model. No retries,
-// no fallbacks, no substitution: any error is returned as-is.
-func (s *Service) chat(ctx context.Context, grader *Grader, msgs []gateway.Message) (string, error) {
+// absoluteChat performs a single absolute-grader gateway call. It sends the
+// strict json_schema response_format when the grader model supports it,
+// json_object when only that is supported, and nothing otherwise —
+// mirroring the view/judge responseFormatFor mechanism with no silent
+// fallback. Any error is returned as-is.
+func (s *Service) absoluteChat(ctx context.Context, grader *Grader, msgs []gateway.Message) (string, error) {
+	return s.chatWithFormat(ctx, grader, msgs, s.graderResponseFormat(grader.Model))
+}
+
+// graderResponseFormat selects the response format for an absolute-grader
+// call: strict json_schema (schema.AbsoluteJSONSchema) when supported, else
+// json_object when supported, else nil. This is the grading analogue of the
+// view/judge responseFormatFor helpers in internal/council and
+// internal/harness.
+func (s *Service) graderResponseFormat(model string) *gateway.ResponseFormat {
+	if s.models == nil {
+		return nil
+	}
+	_, _, _, jsonSchema, jsonObject := s.models.Supports(model)
+	switch {
+	case jsonSchema:
+		return &gateway.ResponseFormat{
+			Type: "json_schema", SchemaName: "absolute",
+			Schema: json.RawMessage(schema.AbsoluteJSONSchema), Strict: true,
+		}
+	case jsonObject:
+		return &gateway.ResponseFormat{Type: "json_object"}
+	default:
+		return nil
+	}
+}
+
+// chatWithFormat performs a single gateway call with the grader model and
+// the given response format. No retries, no fallbacks, no substitution:
+// any error is returned as-is.
+func (s *Service) chatWithFormat(ctx context.Context, grader *Grader, msgs []gateway.Message, rf *gateway.ResponseFormat) (string, error) {
 	resp, err := s.gw.Chat(ctx, gateway.ChatRequest{
 		Model:           grader.Model,
 		Messages:        msgs,
 		MaxOutputTokens: graderMaxOutputTokens,
+		ResponseFormat:  rf,
 		Tags:            map[string]string{"grader": grader.GraderKey},
 	})
 	if err != nil {
 		return "", errf("grader %q call: %v", grader.GraderKey, err)
 	}
 	return resp.Content, nil
+}
+
+// chat performs a single gateway call with the grader model. No retries,
+// no fallbacks, no substitution: any error is returned as-is.
+func (s *Service) chat(ctx context.Context, grader *Grader, msgs []gateway.Message) (string, error) {
+	return s.chatWithFormat(ctx, grader, msgs, nil)
 }
