@@ -12,13 +12,15 @@ import (
 	"github.com/qoke/toughdecisions/internal/store"
 )
 
-// graderMaxOutputTokens is the grader call budget. The largest complete
-// evidence grade is 4916 chars (~1250 tokens); the one length-truncated reply
-// died at 2663 chars under the old 2000-token cap. Doubling to 4000 keeps the
-// longest observed grade plus full chain-of-thought headroom while staying far
-// below the 128k provider ceiling, and mirrors the judge seat's 3000-token
-// budget (pack.DefaultJudgeMaxOutputTokens) with margin for grader verbosity.
-const graderMaxOutputTokens = 4000
+// GraderDefaultMaxOutputTokens is the floor for grader call budgets: the
+// per-grader max_output_tokens seat setting (graders.yaml) is used when it
+// exceeds this floor (task D6: a reasoning model length-truncated a full
+// absolute grade at the old 4000-token cap — completion_tokens=4000,
+// finish_reason=length on both attempts). The largest complete grade needs
+// ~1250 tokens of JSON for five scored criteria with supporting passages,
+// a weakness, and flags; the remaining budget is headroom so the grader
+// can emit complete JSON, never a truncated prefix.
+const GraderDefaultMaxOutputTokens = 8000
 
 // rubricCriteria are the five absolute-grading criteria required in every
 // scores map.
@@ -829,6 +831,26 @@ func (s *Service) graderResponseFormat(model string) *gateway.ResponseFormat {
 	}
 }
 
+// graderBudgetFor returns the output-token budget for a grader call: the
+// per-grader max_output_tokens seat setting carried in ParamsJSON
+// (graders.yaml, synced by cmd/council syncGradersFile) when it exceeds
+// the GraderDefaultMaxOutputTokens floor, else the floor. The registry
+// (internal/models) carries no per-model output ceiling — MaxOutputTokens
+// is always allowed — so the seat setting is the capability-derived
+// source. ParamsJSON is untrusted and never fails a call: unparseable or
+// non-positive values fall back to the floor.
+func graderBudgetFor(grader *Grader) int {
+	if grader != nil && strings.TrimSpace(grader.ParamsJSON) != "" {
+		var params struct {
+			MaxOutputTokens int `json:"max_output_tokens"`
+		}
+		if err := json.Unmarshal([]byte(grader.ParamsJSON), &params); err == nil && params.MaxOutputTokens > GraderDefaultMaxOutputTokens {
+			return params.MaxOutputTokens
+		}
+	}
+	return GraderDefaultMaxOutputTokens
+}
+
 // chatWithFormat performs a single gateway call with the grader model and
 // the given response format. No retries, no fallbacks, no substitution:
 // any error is returned as-is.
@@ -836,7 +858,7 @@ func (s *Service) chatWithFormat(ctx context.Context, grader *Grader, msgs []gat
 	resp, err := s.gw.Chat(ctx, gateway.ChatRequest{
 		Model:           grader.Model,
 		Messages:        msgs,
-		MaxOutputTokens: graderMaxOutputTokens,
+		MaxOutputTokens: graderBudgetFor(grader),
 		ResponseFormat:  rf,
 		Tags:            map[string]string{"grader": grader.GraderKey},
 	})

@@ -181,15 +181,22 @@ func TestGradePersistsEvidenceArrayPassages(t *testing.T) {
 	if !strings.Contains(res.Grade.PassagesJSON, "waived all late fees") {
 		t.Fatalf("PassagesJSON = %s; want the evidence passage persisted", res.Grade.PassagesJSON)
 	}
-	if got := fake.Calls[0].MaxOutputTokens; got != graderMaxOutputTokens {
-		t.Fatalf("MaxOutputTokens = %d; want %d", got, graderMaxOutputTokens)
+	if got := fake.Calls[0].MaxOutputTokens; got != GraderDefaultMaxOutputTokens {
+		t.Fatalf("MaxOutputTokens = %d; want %d", got, GraderDefaultMaxOutputTokens)
 	}
 }
 
-func TestGradeSendsRaisedTokenBudget(t *testing.T) {
+// TestGradeUsesSeatMaxOutputTokensWhenRaised pins the D6 capability
+// derivation: the grader call budget is the per-grader max_output_tokens
+// seat setting from graders.yaml (ParamsJSON) when it exceeds the floor,
+// not a hardcoded constant. It fails if the 4000 cap (or any constant)
+// returns.
+func TestGradeUsesSeatMaxOutputTokensWhenRaised(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig(t)
-	g := insertGrader(t, db, mkGrader("gbud", "openai", "selection", true))
+	base := mkGrader("gbud", "openai", "selection", true)
+	base.ParamsJSON = `{"max_output_tokens":12000,"reasoning_effort":"","temperature":null,"top_p":null}`
+	g := insertGrader(t, db, base)
 	resp := mkResponse(t, db, "possibility", "another thoughtful advice body here")
 	scores := map[string]int{
 		"grounding_and_calibration": 2, "context_and_values_fidelity": 2,
@@ -204,12 +211,55 @@ func TestGradeSendsRaisedTokenBudget(t *testing.T) {
 	if _, err := svc.Grade(context.Background(), schema.CaseInput{}, "", resp, g, nil); err != nil {
 		t.Fatalf("Grade: %v", err)
 	}
-	// Assert: the grader call carries the raised budget, not the old 2000 cap.
+	// Assert: the grader call carries the seat budget (12000), never the
+	// old 4000 cap.
 	if len(fake.Calls) != 1 {
 		t.Fatalf("calls = %d; want 1", len(fake.Calls))
 	}
-	if got := fake.Calls[0].MaxOutputTokens; got != 4000 {
-		t.Fatalf("MaxOutputTokens = %d; want 4000", got)
+	if got := fake.Calls[0].MaxOutputTokens; got != 12000 {
+		t.Fatalf("MaxOutputTokens = %d; want 12000 (seat setting)", got)
+	}
+}
+
+// TestGradeBudgetFallsBackToFloor pins the D6 floor: a grader without a
+// raised seat budget (empty/legacy ParamsJSON) still gets a budget above
+// the old 4000 cap, so a full-rubric response is never truncated.
+func TestGradeBudgetFallsBackToFloor(t *testing.T) {
+	cases := []struct {
+		name   string
+		params string
+	}{
+		{"empty params", "{}"},
+		{"legacy zero budget", `{"max_output_tokens":0}`},
+		{"below floor", `{"max_output_tokens":2000}`},
+		{"unparseable params", "not-json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			cfg := testConfig(t)
+			base := mkGrader("gfloor", "openai", "selection", true)
+			base.ParamsJSON = tc.params
+			g := insertGrader(t, db, base)
+			resp := mkResponse(t, db, "possibility", "floor budget body here")
+			scores := map[string]int{
+				"grounding_and_calibration": 2, "context_and_values_fidelity": 2,
+				"decision_insight": 2, "practical_robustness": 2, "role_execution": 2,
+			}
+			fake := gateway.NewFake(map[string][]gateway.Step{
+				g.Model: {{Content: gradeJSON(scores, "")}},
+			})
+			svc := NewService(db, fake, cfg)
+			if _, err := svc.Grade(context.Background(), schema.CaseInput{}, "", resp, g, nil); err != nil {
+				t.Fatalf("Grade: %v", err)
+			}
+			if got := fake.Calls[0].MaxOutputTokens; got != GraderDefaultMaxOutputTokens {
+				t.Fatalf("MaxOutputTokens = %d; want floor %d", got, GraderDefaultMaxOutputTokens)
+			}
+			if GraderDefaultMaxOutputTokens <= 4000 {
+				t.Fatalf("floor = %d; want above the old 4000 cap", GraderDefaultMaxOutputTokens)
+			}
+		})
 	}
 }
 

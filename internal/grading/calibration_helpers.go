@@ -48,6 +48,30 @@ func (s *Service) invalidateAdmission(configHash string) error {
 	return nil
 }
 
+// persistCalibrationFailure records a grader's hard failure for that
+// grader only (failed/absent, with the reason): admitted=false with a
+// calibration_json carrying the error. It is the calibrate --all
+// counterpart to recording failures as absent — a failing grader never
+// masks the others.
+func (s *Service) persistCalibrationFailure(grader *Grader, reason error) error {
+	raw, err := json.Marshal(map[string]any{"error": reason.Error(), "items": []calibrationRow{}})
+	if err != nil {
+		return errf("marshal calibration failure: %v", err)
+	}
+	if err := s.db.SetGraderCalibration(grader.ConfigHash, string(raw), false, nil); err != nil {
+		return errf("store calibration failure: %v", err)
+	}
+	return nil
+}
+
+// RecordCalibrationFailure records a grader's hard calibration failure
+// for that grader only (failed/absent, with the reason) and is exported
+// so the calibrate --all command can continue evaluating the remaining
+// graders after one grader's hard failure.
+func (s *Service) RecordCalibrationFailure(grader *Grader, reason error) error {
+	return s.persistCalibrationFailure(grader, reason)
+}
+
 // persistCalibration stores calibration_json and the admission decision:
 // admitted = reversals <= AdmitMaxReversals.
 func (s *Service) persistCalibration(grader *Grader, rows []calibrationRow, reversals int) error {
