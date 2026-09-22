@@ -44,7 +44,7 @@ func dbMigrate([]string) int {
 		fmt.Fprintf(os.Stderr, "db migrate: %v\n", err)
 		return exitError
 	}
-	fmt.Printf("db migrate: ok (%d migrations applied)\n", len(applied))
+	fmt.Printf("db migrate: ok (%d migrations recorded)\n", len(applied))
 	for _, v := range applied {
 		fmt.Printf("  %s\n", v)
 	}
