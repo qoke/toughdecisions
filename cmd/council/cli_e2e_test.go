@@ -1,8 +1,10 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -708,5 +710,109 @@ func TestHarnessRunnerErrorBranches(t *testing.T) {
 		if got := run(args); got != exitError {
 			t.Fatalf("%v = %d, want 1", args, got)
 		}
+	}
+}
+
+// captureStdout runs fn while capturing everything it writes to os.Stdout.
+// It returns the captured output and fn's exit code.
+func captureStdout(t *testing.T, fn func() int) (string, int) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	// Drain in a goroutine so a full pipe buffer cannot deadlock the writer.
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	code := fn()
+	_ = w.Close()
+	os.Stdout = old
+	out := <-done
+	_ = r.Close()
+	return out, code
+}
+
+// unsetDBPathEnv removes COUNCIL_DB_PATH for the current test and restores its
+// original presence (or absence) afterward. cfggo resolves config with
+// os.LookupEnv, so a present-but-empty var is NOT equivalent to unset; a bare
+// restore of Setenv(name, "") would hand later tests db_path="".
+func unsetDBPathEnv(t *testing.T) {
+	t.Helper()
+	const name = "COUNCIL_DB_PATH"
+	if saved, ok := os.LookupEnv(name); ok {
+		t.Cleanup(func() { _ = os.Setenv(name, saved) })
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	t.Cleanup(func() { _ = os.Unsetenv(name) })
+}
+
+// TestDbMigrateDefaultPathBootstrap exercises the README's first bootstrap step
+// at the real, un-overridden default db path (./data/council.db) inside a
+// throwaway working directory. Every other e2e test overrides COUNCIL_DB_PATH,
+// which is why the fresh-clone failure went unnoticed: a clone has no data/
+// directory because it is gitignored.
+func TestDbMigrateDefaultPathBootstrap(t *testing.T) {
+	t.Chdir(t.TempDir())
+	unsetDBPathEnv(t)
+
+	// The documentation provisions the store directory before migrating; the
+	// relative default resolves inside the temp cwd.
+	if err := os.MkdirAll("data", 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := captureStdout(t, func() int { return run([]string{"db", "migrate"}) })
+	if code != exitOK {
+		t.Fatalf("first migrate = %d, want %d (stdout %q)", code, exitOK, out)
+	}
+	if _, err := os.Stat(filepath.Join("data", "council.db")); err != nil {
+		t.Fatalf("default db not created: %v", err)
+	}
+	if !strings.Contains(out, "recorded") {
+		t.Errorf("first migrate stdout = %q, want it to mention recorded", out)
+	}
+	if strings.Contains(out, "applied") {
+		t.Errorf("first migrate stdout = %q, must not claim migrations were applied", out)
+	}
+
+	// A no-op re-run must report what was recorded, not that it applied work.
+	out2, code2 := captureStdout(t, func() int { return run([]string{"db", "migrate"}) })
+	if code2 != exitOK {
+		t.Fatalf("second migrate = %d, want %d (stdout %q)", code2, exitOK, out2)
+	}
+	if !strings.Contains(out2, "recorded") {
+		t.Errorf("no-op re-run stdout = %q, want it to mention recorded", out2)
+	}
+	if strings.Contains(out2, "applied") {
+		t.Errorf("no-op re-run stdout = %q, must not claim migrations were applied", out2)
+	}
+}
+
+// TestDbMigrateDefaultPathRequiresDataDir pins the deliberate boundary: with the
+// default relative db path and no data/ directory (a fresh clone that has not
+// yet run the documented provisioning step), `db migrate` exits non-zero. The
+// binary is intentionally NOT changed to auto-create parent directories;
+// provisioning data/ is the documented bootstrap step. Do not "fix" the
+// command to succeed here.
+func TestDbMigrateDefaultPathRequiresDataDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	unsetDBPathEnv(t)
+
+	// Intentionally no os.MkdirAll("data", ...).
+	if _, err := os.Stat("data"); !os.IsNotExist(err) {
+		t.Fatalf("test setup: data/ unexpectedly present: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int { return run([]string{"db", "migrate"}) })
+	if code != exitError {
+		t.Fatalf("migrate without data/ = %d, want %d (stdout %q)", code, exitError, out)
 	}
 }
