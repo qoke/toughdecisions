@@ -45,6 +45,7 @@ ci: fmt-check vet build test-race ## What CI runs (excluding coverage + lint)
 # weekly) and the long-running `council serve` are intentionally NOT run here —
 # see README.md "Bootstrap".
 bootstrap: ## Bootstrap the store + shipped pack (go run)
+	mkdir -p data # data/ is gitignored and absent in a fresh clone
 	go run $(PKG) db migrate
 	go run $(PKG) pack init --file config/pack.yaml
 	@echo "store ready; next: go run $(PKG) serve  (or 'make build && ./bin/$(BINARY) serve')"

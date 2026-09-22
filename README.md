@@ -21,6 +21,7 @@ Hard rules (visible in code, not just docs):
 ## Bootstrap
 
 ```sh
+mkdir -p data                            # store directory must exist before migration
 council db migrate                        # create/migrate the SQLite store
 council pack init --file config/pack.yaml # load the initial production pack
 council serve                             # production is usable from here
@@ -105,6 +106,7 @@ Full bootstrap (copy-paste; sentinel refuses until baselines exist, so the
 baselines step must come before the first weekly run):
 
 ```sh
+mkdir -p data                            # store directory must exist before migration
 council db migrate
 council pack init --file config/pack.yaml
 council serve                                    # production usable from here

@@ -471,7 +471,7 @@ council feedback summary --days 7
 ```
 Exit codes: 0 ok, 1 error, 2 validation failure, 3 blocked (grader drift / checklist fail).
 
-**Bootstrap sequence (README):** `db migrate` → `pack init` → `serve` (production is usable from here) → author `casepack/` and `calibration.yaml` → `cases load` → `graders calibrate --all` → `harness compare --candidate <key>` with the initial pack as sole candidate is unnecessary: instead `pack publish --baselines-only` (flag that only fills `baselines` for the active pack) → schedule `harness weekly --notify`.
+**Bootstrap sequence (README):** `mkdir -p data` → `db migrate` → `pack init` → `serve` (production is usable from here) → author `casepack/` and `calibration.yaml` → `cases load` → `graders calibrate --all` → `harness compare --candidate <key>` with the initial pack as sole candidate is unnecessary: instead `pack publish --baselines-only` (flag that only fills `baselines` for the active pack) → schedule `harness weekly --notify`.
 
 ## 14. n8n integration
 
