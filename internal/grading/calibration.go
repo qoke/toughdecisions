@@ -22,6 +22,9 @@ func (s *Service) Calibrate(ctx context.Context, grader *Grader) (int, error) {
 	if grader == nil {
 		return 0, errf("calibrate requires a grader")
 	}
+	if err := s.ValidateGrader(grader); err != nil {
+		return 0, err
+	}
 	if err := s.invalidateAdmission(grader.ConfigHash); err != nil {
 		return 0, err
 	}
@@ -49,6 +52,9 @@ func (s *Service) Calibrate(ctx context.Context, grader *Grader) (int, error) {
 func (s *Service) Recheck(ctx context.Context, grader *Grader, n int) (int, error) {
 	if grader == nil {
 		return 0, errf("recheck requires a grader")
+	}
+	if err := s.ValidateGrader(grader); err != nil {
+		return 0, err
 	}
 	if n <= 0 {
 		return 0, errf("recheck requires n > 0")

@@ -663,6 +663,11 @@ func (s *Service) Grade(ctx context.Context, in schema.CaseInput, acceptance str
 	if strings.TrimSpace(grader.ConfigHash) == "" {
 		return nil, errf("grader config_hash is required")
 	}
+	// Early fail-closed validation: reject a grader whose model cannot
+	// enforce the strict schema before any cache lookup or gateway call.
+	if err := s.ValidateGrader(grader); err != nil {
+		return nil, err
+	}
 	// Self-grading avoidance is enforced by SelectGrader before Grade:
 	// stored responses carry no family, so Grade cannot re-derive it.
 	rubricHash := grader.RubricHash
@@ -800,34 +805,34 @@ func (s *Service) graderChat(ctx context.Context, grader *Grader, msgs []gateway
 }
 
 // absoluteChat performs a single absolute-grader gateway call. It sends the
-// strict json_schema response_format when the grader model supports it,
-// json_object when only that is supported, and nothing otherwise —
-// mirroring the view/judge responseFormatFor mechanism with no silent
-// fallback. Any error is returned as-is.
+// strict json_schema response_format; a grader model without strict
+// json_schema support is rejected by ValidateGrader, never downgraded to
+// json_object. Any error is returned as-is.
 func (s *Service) absoluteChat(ctx context.Context, grader *Grader, msgs []gateway.Message) (string, error) {
+	if err := s.ValidateGrader(grader); err != nil {
+		return "", err
+	}
 	return s.chatWithFormat(ctx, grader, msgs, s.graderResponseFormat(grader.Model))
 }
 
 // graderResponseFormat selects the response format for an absolute-grader
-// call: strict json_schema (schema.AbsoluteJSONSchema) when supported, else
-// json_object when supported, else nil. This is the grading analogue of the
-// view/judge responseFormatFor helpers in internal/council and
-// internal/harness.
+// call: strict json_schema (schema.AbsoluteJSONSchema) when supported,
+// else nil. There is intentionally no json_object fallback — an
+// unenforced grader shape is a degraded grade, so ValidateGrader rejects
+// such models before any call. A nil registry returns nil (the unit-test
+// path); the view/judge responseFormatFor helpers in internal/council and
+// internal/harness keep their own json_object behaviour and are untouched.
 func (s *Service) graderResponseFormat(model string) *gateway.ResponseFormat {
 	if s.models == nil {
 		return nil
 	}
-	_, _, _, jsonSchema, jsonObject := s.models.Supports(model)
-	switch {
-	case jsonSchema:
-		return &gateway.ResponseFormat{
-			Type: "json_schema", SchemaName: "absolute",
-			Schema: json.RawMessage(schema.AbsoluteJSONSchema), Strict: true,
-		}
-	case jsonObject:
-		return &gateway.ResponseFormat{Type: "json_object"}
-	default:
+	_, _, _, jsonSchema, _ := s.models.Supports(model)
+	if !jsonSchema {
 		return nil
+	}
+	return &gateway.ResponseFormat{
+		Type: "json_schema", SchemaName: "absolute",
+		Schema: json.RawMessage(schema.AbsoluteJSONSchema), Strict: true,
 	}
 }
 

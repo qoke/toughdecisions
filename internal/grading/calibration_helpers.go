@@ -100,6 +100,9 @@ func (s *Service) persistCalibration(grader *Grader, rows []calibrationRow, reve
 // quietly produce a 0 score.
 func (s *Service) gradeItems(ctx context.Context, grader *Grader, items []*store.CalibrationItem) ([]calibrationRow, int, error) {
 	resolved := make([]resolvedItem, 0, len(items))
+	if err := s.ValidateGrader(grader); err != nil {
+		return nil, 0, err
+	}
 	for _, it := range items {
 		in, acceptance, err := s.caseContextForItem(it)
 		if err != nil {

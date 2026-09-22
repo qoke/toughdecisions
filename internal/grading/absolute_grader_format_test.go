@@ -49,7 +49,9 @@ func schemaScores() map[string]int {
 
 // TestGraderResponseFormat honors per-model capability with no silent
 // fallback: strict json_schema (the absolute schema) when supported, else
-// json_object when supported, else nil. A nil registry sends nothing.
+// nil. A json_object-only model gets no schema (ValidateGrader rejects it
+// before any call), a plain model gets nil, an unknown model gets nil, and
+// a nil registry sends nothing.
 func TestGraderResponseFormat(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig(t)
@@ -60,8 +62,8 @@ func TestGraderResponseFormat(t *testing.T) {
 		rf.SchemaName != "absolute" || string(rf.Schema) != schema.AbsoluteJSONSchema {
 		t.Fatalf("g-schema format = %+v; want strict json_schema absolute", rf)
 	}
-	if rf := svc.graderResponseFormat("g-object"); rf == nil || rf.Type != "json_object" {
-		t.Fatalf("g-object format = %+v; want json_object (no silent schema)", rf)
+	if rf := svc.graderResponseFormat("g-object"); rf != nil {
+		t.Fatalf("g-object format = %+v; want nil (no json_object downgrade for graders)", rf)
 	}
 	if rf := svc.graderResponseFormat("g-plain"); rf != nil {
 		t.Fatalf("g-plain format = %+v; want nil", rf)
@@ -104,8 +106,9 @@ func TestGradeSendsGraderResponseFormat(t *testing.T) {
 	}
 }
 
-// TestGradeSendsJSONObjectForObjectOnlyModel proves no silent fallback: a
-// json_object-only model gets json_object, never the schema.
+// TestGradeSendsJSONObjectForObjectOnlyModel proves the fail-closed rule:
+// a json_object-only grader model is rejected with the capability error
+// and makes no gateway call.
 func TestGradeSendsJSONObjectForObjectOnlyModel(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig(t)
@@ -119,11 +122,12 @@ func TestGradeSendsJSONObjectForObjectOnlyModel(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 	svc.SetModels(loadGraderTestRegistry(t))
 
-	if _, err := svc.Grade(context.Background(), schema.CaseInput{}, "", resp, g, nil); err != nil {
-		t.Fatalf("Grade: %v", err)
+	if _, err := svc.Grade(context.Background(), schema.CaseInput{}, "", resp, g, nil); err == nil ||
+		!strings.Contains(err.Error(), "does not support strict structured outputs") {
+		t.Fatalf("Grade err = %v; want strict-structured-output rejection", err)
 	}
-	if rf := fake.Calls[0].ResponseFormat; rf == nil || rf.Type != "json_object" {
-		t.Fatalf("call format = %+v; want json_object", rf)
+	if fake.CallCount() != 0 {
+		t.Fatalf("calls = %d; want 0 (rejected before any gateway call)", fake.CallCount())
 	}
 }
 
