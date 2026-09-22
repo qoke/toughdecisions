@@ -715,7 +715,7 @@ func TestHarnessRunnerErrorBranches(t *testing.T) {
 
 // captureStdout runs fn while capturing everything it writes to os.Stdout.
 // It returns the captured output and fn's exit code.
-func captureStdout(t *testing.T, fn func() int) (string, int) {
+func captureStdout(t *testing.T, fn func() int) (out string, code int) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -724,16 +724,29 @@ func captureStdout(t *testing.T, fn func() int) (string, int) {
 	old := os.Stdout
 	os.Stdout = w
 	// Drain in a goroutine so a full pipe buffer cannot deadlock the writer.
-	done := make(chan string, 1)
+	done := make(chan struct {
+		b   []byte
+		err error
+	}, 1)
 	go func() {
-		b, _ := io.ReadAll(r)
-		done <- string(b)
+		b, err := io.ReadAll(r)
+		done <- struct {
+			b   []byte
+			err error
+		}{b, err}
 	}()
-	code := fn()
-	_ = w.Close()
-	os.Stdout = old
-	out := <-done
-	_ = r.Close()
+	defer func() {
+		// Restore stdout first so a panicking/Goexit-ing fn cannot leave it swapped.
+		os.Stdout = old
+		_ = w.Close()
+		res := <-done
+		_ = r.Close()
+		if res.err != nil {
+			t.Errorf("capture stdout: %v", res.err)
+		}
+		out = string(res.b)
+	}()
+	code = fn()
 	return out, code
 }
 
