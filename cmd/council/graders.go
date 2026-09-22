@@ -212,11 +212,20 @@ func gradersCalibrate(args []string) int {
 	svc := grading.NewService(db, gw, cfg)
 	svc.SetModels(mreg)
 	blocked := false
+	failed := false
 	for _, g := range targets {
 		reversals, err := svc.Calibrate(context.Background(), (*grading.Grader)(g))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "graders calibrate: %s: %v\n", g.GraderKey, err)
-			return exitError
+			// Record the hard failure for this grader (failed/absent,
+			// with the reason) and keep evaluating the others — one
+			// unparseable grader must not mask the remaining results.
+			if ferr := svc.RecordCalibrationFailure((*grading.Grader)(g), err); ferr != nil {
+				fmt.Fprintf(os.Stderr, "graders calibrate: %s: %v (record failure: %v)\n", g.GraderKey, err, ferr)
+			} else {
+				fmt.Fprintf(os.Stderr, "graders calibrate: %s: %v\n", g.GraderKey, err)
+			}
+			failed = true
+			continue
 		}
 		status := "admitted"
 		if reversals > cfg.AdmitMaxReversals() {
@@ -224,6 +233,9 @@ func gradersCalibrate(args []string) int {
 			blocked = true
 		}
 		fmt.Printf("graders calibrate: %s reversals=%d %s\n", g.GraderKey, reversals, status)
+	}
+	if failed {
+		return exitError
 	}
 	if blocked {
 		return exitBlocked
