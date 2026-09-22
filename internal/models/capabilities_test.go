@@ -52,6 +52,9 @@ func TestLoadRegistryParsesTempYAML(t *testing.T) {
 	if !temp || !topP || !effort || !js || !jo {
 		t.Fatalf("Supports = %v %v %v %v %v", temp, topP, effort, js, jo)
 	}
+	if !r.Known("council-gpt-x") || r.Known("nope") {
+		t.Fatal("Known misreports registry membership")
+	}
 }
 
 func TestLoadRegistryDuplicateIDs(t *testing.T) {

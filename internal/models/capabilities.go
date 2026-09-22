@@ -81,6 +81,12 @@ func (r *Registry) ValidateSettings(sc pack.SeatConfig) error {
 	return nil
 }
 
+// Known reports whether modelID exists in the registry.
+func (r *Registry) Known(modelID string) bool {
+	_, ok := r.byID[modelID]
+	return ok
+}
+
 // ExpectedPrefixes returns the expected response-model prefixes for a model id,
 // or nil when the model is unknown.
 func (r *Registry) ExpectedPrefixes(modelID string) []string {
