@@ -7,9 +7,10 @@ import (
 )
 
 const validViewJSON = `{
-  "urgent_danger": {"present": false},
+  "urgent_danger": {"present": false, "caution": ""},
   "qualification": "q",
   "suggested_reply": "r",
+  "recommended_move": "m",
   "decisive_insight": "i",
   "tradeoff_or_objection": "t",
   "depends_on": "d",
@@ -150,20 +151,110 @@ func itoa(i int) string {
 	return string(b[p:])
 }
 
+// TestSchemasStrictModeRequiresAllProperties pins the OpenAI strict-mode
+// required-superset rule ("'required' ... [must be] an array including every
+// key in properties", per the live proxy 400 body "Missing 'caution'"):
+// every object node's properties must all appear in required, recursively.
+// Reverting mustStrictNormalize's required merge (leaving e.g.
+// urgent_danger.required=["present"] while properties has present+caution)
+// fails this offline instead of 400ing every real call.
+func TestSchemasStrictModeRequiresAllProperties(t *testing.T) {
+	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema} {
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			t.Fatalf("%s schema invalid: %v", name, err)
+		}
+		assertRequiredSuperset(t, name, "$", v)
+	}
+	// Spot-check the exact property that 400ed live.
+	for name, s := range map[string]string{"view": ViewJSONSchema, "judge": JudgeJSONSchema} {
+		var sch map[string]any
+		if err := json.Unmarshal([]byte(s), &sch); err != nil {
+			t.Fatalf("%s schema invalid: %v", name, err)
+		}
+		props, _ := sch["properties"].(map[string]any)
+		ud, _ := props["urgent_danger"].(map[string]any)
+		req, _ := ud["required"].([]any)
+		have := map[string]bool{}
+		for _, r := range req {
+			if str, ok := r.(string); ok {
+				have[str] = true
+			}
+		}
+		if !have["present"] || !have["caution"] {
+			t.Fatalf("%s urgent_danger.required = %v; want [present caution]", name, req)
+		}
+	}
+}
+
+// assertRequiredSuperset depth-first walks a decoded schema: every object
+// node with "properties" must list each property key in "required".
+func assertRequiredSuperset(t *testing.T, schemaName, path string, v any) {
+	t.Helper()
+	switch n := v.(type) {
+	case map[string]any:
+		if props, ok := n["properties"].(map[string]any); ok && isObjectNode(n) {
+			have := map[string]bool{}
+			if req, ok := n["required"].([]any); ok {
+				for _, r := range req {
+					if s, ok := r.(string); ok {
+						have[s] = true
+					}
+				}
+			}
+			for name := range props {
+				if !have[name] {
+					t.Errorf("%s %s: property %q missing from required", schemaName, path, name)
+				}
+			}
+		}
+		for k, child := range n {
+			assertRequiredSuperset(t, schemaName, path+"."+k, child)
+		}
+	case []any:
+		for i, child := range n {
+			assertRequiredSuperset(t, schemaName, path+"["+itoa(i)+"]", child)
+		}
+	}
+}
+
+// TestParseLenientGradeRejectsMissingOrPartialScores pins D3: a grade
+// payload with no "scores" key, or with fewer than the five rubric criteria,
+// is rejected — never coerced to a mean-0 grade that manufactures phantom
+// calibration reversals (15/33 live responses).
+func TestParseLenientGradeRejectsMissingOrPartialScores(t *testing.T) {
+	for _, raw := range []string{
+		`{"supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"overall_assessment": "fine", "supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"scores": {"grounding_and_calibration": 3}, "supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+		`{"scores": {}, "supporting_passages": [], "notes_check": {"noticed": [], "missed": [], "beyond_notes": []}}`,
+	} {
+		if grade, ok := ParseLenient[AbsoluteGrade](raw); ok {
+			t.Fatalf("ParseLenient[AbsoluteGrade] accepted %s: %+v", raw, grade)
+		}
+	}
+}
+
 const validJudgeJSON = `{
   "urgent_danger": {"present": true, "caution": "c"},
+  "no_independent_views": false,
+  "missing_roles": [],
   "qualification": "q",
   "recommended_reply": "r",
+  "recommended_action": "a2",
   "why": "w",
   "accepted_cost": "a",
   "next": {"immediate": "i", "forward": "f"},
-  "change_course_if": "c"
+  "change_course_if": "c",
+  "unresolved_disagreement": ""
 }`
 
 // TestSchemasAcceptWellFormedRejectMalformed checks the normalized schemas
 // still validate a representative payload and reject a malformed one. The
 // check is structural (required fields present and non-empty) mirroring the
-// schema required/minLength constraints, without new dependencies.
+// schema required/minLength constraints, without new dependencies. Under the
+// strict-mode contract every property is required, so the expected required
+// sets are the full property sets.
 func TestSchemasAcceptWellFormedRejectMalformed(t *testing.T) {
 	for name, tc := range map[string]struct {
 		schema   string
@@ -171,10 +262,10 @@ func TestSchemasAcceptWellFormedRejectMalformed(t *testing.T) {
 		valid    string
 	}{
 		"view": {ViewJSONSchema,
-			[]string{"urgent_danger", "qualification", "suggested_reply", "decisive_insight", "tradeoff_or_objection", "depends_on", "fallback"},
+			[]string{"urgent_danger", "qualification", "suggested_reply", "recommended_move", "decisive_insight", "tradeoff_or_objection", "depends_on", "fallback"},
 			validViewJSON},
 		"judge": {JudgeJSONSchema,
-			[]string{"urgent_danger", "qualification", "recommended_reply", "why", "accepted_cost", "next", "change_course_if"},
+			[]string{"urgent_danger", "no_independent_views", "missing_roles", "qualification", "recommended_reply", "recommended_action", "why", "accepted_cost", "next", "change_course_if", "unresolved_disagreement"},
 			validJudgeJSON},
 	} {
 		var sch map[string]any
@@ -190,12 +281,8 @@ func TestSchemasAcceptWellFormedRejectMalformed(t *testing.T) {
 			t.Fatalf("%s valid payload invalid JSON: %v", name, err)
 		}
 		for _, f := range tc.required {
-			v, ok := good[f]
-			if !ok {
+			if _, ok := good[f]; !ok {
 				t.Fatalf("%s valid payload missing %q", name, f)
-			}
-			if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
-				t.Fatalf("%s valid payload has empty %q", name, f)
 			}
 		}
 		// Malformed: drop every required field but one.

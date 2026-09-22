@@ -103,13 +103,36 @@ func validate[T any](v T) bool {
 		}
 		return true
 	case AbsoluteGrade:
-		for _, score := range t.Scores {
-			if score < 0 || score > 4 {
-				return false
-			}
-		}
-		return true
+		return validAbsoluteScores(t.Scores)
 	default:
 		return true
 	}
+}
+
+// rubricCriterionKeys are the five absolute-grading criteria required in
+// every AbsoluteGrade scores map. They duplicate grading's list to avoid an
+// import cycle; keep them in sync.
+var rubricCriterionKeys = []string{
+	"grounding_and_calibration",
+	"context_and_values_fidelity",
+	"decision_insight",
+	"practical_robustness",
+	"role_execution",
+}
+
+// validAbsoluteScores requires exactly the five rubric criteria, each 0-4.
+// A missing scores object (nil/empty after unmarshal) or a partial map is
+// rejected: coercing absent scores to zeros manufactures mean-0 grades and
+// phantom calibration reversals.
+func validAbsoluteScores(scores map[string]int) bool {
+	if len(scores) != len(rubricCriterionKeys) {
+		return false
+	}
+	for _, name := range rubricCriterionKeys {
+		score, ok := scores[name]
+		if !ok || score < 0 || score > 4 {
+			return false
+		}
+	}
+	return true
 }

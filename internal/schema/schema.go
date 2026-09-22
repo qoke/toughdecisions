@@ -171,19 +171,27 @@ const judgeJSONSchemaTmpl = `{
 }`
 
 // ViewJSONSchema is the strict-mode-normalized View output JSON Schema:
-// every object at every nesting depth carries "additionalProperties": false,
-// as required by OpenAI-family structured outputs when strict is true.
+// every object at every nesting depth carries "additionalProperties": false
+// and lists every property in "required", as required by OpenAI-family
+// structured outputs when strict is true ("'required' ... [must be] an array
+// including every key in properties" per the live proxy 400 body).
 // Normalization runs centrally here so no call site can regress.
+// Previously-optional fields (caution, recommended_move, ...) keep their
+// plain "type": "string" (no minLength): requiring them does not force null,
+// models emit "" when absent, which parses to the Go zero value. No
+// ["string","null"] union is needed.
 var ViewJSONSchema = mustStrictNormalize(viewJSONSchemaTmpl)
 
 // JudgeJSONSchema is the strict-mode-normalized Judge output JSON Schema.
 // See ViewJSONSchema for the invariant.
 var JudgeJSONSchema = mustStrictNormalize(judgeJSONSchemaTmpl)
 
-// mustStrictNormalize parses a raw schema template and sets
-// "additionalProperties": false on every object node recursively
-// (root, nested properties, array items, and combinators). It panics on
-// invalid input because the templates are compile-time constants.
+// mustStrictNormalize parses a raw schema template and enforces the
+// OpenAI strict-mode contract on every object node recursively (root,
+// nested properties, array items, and combinators): it sets
+// "additionalProperties": false and merges every key of "properties" into
+// "required" (creating the array when absent, never duplicating). It panics
+// on invalid input because the templates are compile-time constants.
 func mustStrictNormalize(tmpl string) string {
 	var v any
 	if err := json.Unmarshal([]byte(tmpl), &v); err != nil {
@@ -197,7 +205,7 @@ func mustStrictNormalize(tmpl string) string {
 	return string(out)
 }
 
-// strictWalk sets additionalProperties=false on every map that declares
+// strictWalk enforces the strict-mode contract on every map that declares
 // type object (explicitly or implicitly via properties/required), then
 // recurses into every child value so no nesting depth can regress.
 func strictWalk(v any) {
@@ -205,8 +213,12 @@ func strictWalk(v any) {
 	case map[string]any:
 		if typ, ok := n["type"].(string); ok && typ == "object" {
 			n["additionalProperties"] = false
-		} else if _, ok := n["properties"]; ok {
+			requireAllProperties(n)
+		} else if props, ok := n["properties"]; ok {
 			n["additionalProperties"] = false
+			if _, ok := props.(map[string]any); ok {
+				requireAllProperties(n)
+			}
 		} else if _, ok := n["required"]; ok {
 			n["additionalProperties"] = false
 		}
@@ -218,4 +230,33 @@ func strictWalk(v any) {
 			strictWalk(child)
 		}
 	}
+}
+
+// requireAllProperties merges every key of "properties" into "required"
+// (creating the array when absent, preserving existing entries, no
+// duplicates), satisfying the strict-mode required-superset rule.
+func requireAllProperties(n map[string]any) {
+	props, ok := n["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	have := map[string]bool{}
+	var req []any
+	if existing, ok := n["required"].([]any); ok {
+		for _, r := range existing {
+			if s, ok := r.(string); ok {
+				if !have[s] {
+					have[s] = true
+					req = append(req, s)
+				}
+			}
+		}
+	}
+	for name := range props {
+		if !have[name] {
+			have[name] = true
+			req = append(req, name)
+		}
+	}
+	n["required"] = req
 }
