@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/qoke/toughdecisions/internal/gateway"
-	"github.com/qoke/toughdecisions/internal/schema"
 )
 
 // TestCalibrateAcceptsRealShapedArrayPassages pins D2: the calibration path
@@ -24,7 +23,7 @@ func TestCalibrateAcceptsRealShapedArrayPassages(t *testing.T) {
 	fake := gateway.NewFake(map[string][]gateway.Step{g.Model: {{Content: raw}}})
 	svc := NewService(db, fake, cfg)
 
-	reversals, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	reversals, err := svc.Calibrate(context.Background(), g)
 	if err != nil {
 		t.Fatalf("Calibrate real-shaped = %v; want success", err)
 	}
@@ -53,7 +52,7 @@ func TestCalibrateRejectsMissingScores(t *testing.T) {
 	fake := gateway.NewFake(map[string][]gateway.Step{g.Model: {{Content: raw}, {Content: raw}}})
 	svc := NewService(db, fake, cfg)
 
-	res, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	res, err := svc.Calibrate(context.Background(), g)
 	if err == nil {
 		t.Fatalf("Calibrate missing-scores = %d, nil; want unparseable error", res)
 	}

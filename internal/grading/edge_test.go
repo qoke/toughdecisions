@@ -58,16 +58,16 @@ func TestEdgeCases(t *testing.T) {
 		t.Fatal("Cover with nil grader succeeded; want error")
 	}
 	// Calibrate/Recheck validation.
-	if _, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", nil); err == nil {
+	if _, err := svc.Calibrate(context.Background(), nil); err == nil {
 		t.Fatal("Calibrate with nil grader succeeded; want error")
 	}
-	if _, err := svc.Recheck(context.Background(), schema.CaseInput{}, "", nil, 1); err == nil {
+	if _, err := svc.Recheck(context.Background(), nil, 1); err == nil {
 		t.Fatal("Recheck with nil grader succeeded; want error")
 	}
-	if _, err := svc.Recheck(context.Background(), schema.CaseInput{}, "", g, 0); err == nil {
+	if _, err := svc.Recheck(context.Background(), g, 0); err == nil {
 		t.Fatal("Recheck with n=0 succeeded; want error")
 	}
-	if _, err := svc.Recheck(context.Background(), schema.CaseInput{}, "", g, 2); err == nil {
+	if _, err := svc.Recheck(context.Background(), g, 2); err == nil {
 		t.Fatal("Recheck on empty set succeeded; want error")
 	}
 	// SelectGrader skips nil candidates.

@@ -36,7 +36,7 @@ func TestCalibratePropagatesMissingGraderRow(t *testing.T) {
 	ghost := mkGrader("ghost", "openai", "selection", false)
 
 	// Act: config_hash was never upserted.
-	_, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", ghost)
+	_, err := svc.Calibrate(context.Background(), ghost)
 
 	// Assert: DB failure surfaces, no vacuous admission.
 	if err == nil || !strings.Contains(err.Error(), "load grader config") {
@@ -80,7 +80,7 @@ func TestGradeItemsRejectsMalformedHumanScores(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 
 	// Act.
-	_, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	_, err := svc.Calibrate(context.Background(), g)
 
 	// Assert: malformed human scores propagate as a decode error.
 	if err == nil || !strings.Contains(err.Error(), "decode human scores") {
@@ -103,7 +103,7 @@ func TestGradeItemsRejectsMalformedHumanFlags(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 
 	// Act.
-	_, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	_, err := svc.Calibrate(context.Background(), g)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "decode human flags") {

@@ -6,17 +6,19 @@ import (
 	"testing"
 
 	"github.com/qoke/toughdecisions/internal/gateway"
-	"github.com/qoke/toughdecisions/internal/schema"
 	"github.com/qoke/toughdecisions/internal/store"
 )
 
 func ensureCalibCase(t *testing.T, db *store.DB) string {
 	t.Helper()
-	fam, err := db.UpsertFamily(&store.Family{FamilyKey: "F001", Name: "n", Split: "development"})
+	fam, err := db.UpsertFamily(&store.Family{FamilyKey: "F001", Name: "n", Split: "development", AcceptanceJSON: `{"must_notice":["deadline"]}`})
 	if err != nil {
 		t.Fatalf("UpsertFamily: %v", err)
 	}
-	c, err := db.UpsertCase(&store.Case{CaseKey: "case1", FamilyID: fam.ID, Variant: "base", InputJSON: "{}"})
+	c, err := db.UpsertCase(&store.Case{
+		CaseKey: "case1", FamilyID: fam.ID, Variant: "base",
+		InputJSON: `{"card":{"decision":"whether to move","context":"care commitment","priorities":"keep care","unusual":"u","history":"h","deadline":"soon","style":"warm"},"messages":[{"sender":"me","text":"help"}],"question":"what now?"}`,
+	})
 	if err != nil {
 		t.Fatalf("UpsertCase: %v", err)
 	}
@@ -59,7 +61,7 @@ func TestCalibrateAdmits(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 
 	// Act.
-	reversals, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	reversals, err := svc.Calibrate(context.Background(), g)
 	// Assert: zero reversals -> admitted with persisted calibration_json.
 	if err != nil || reversals != 0 {
 		t.Fatalf("Calibrate = %d, %v; want 0, nil", reversals, err)
@@ -89,7 +91,7 @@ func TestCalibrateRejectsOnDrift(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 
 	// Act.
-	reversals, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	reversals, err := svc.Calibrate(context.Background(), g)
 	// Assert: reversals exceed AdmitMaxReversals(1) -> not admitted.
 	if err != nil || reversals != 2 {
 		t.Fatalf("Calibrate = %d, %v; want 2, nil", reversals, err)
@@ -115,7 +117,7 @@ func TestCalibrateFlagMismatchIsReversal(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 
 	// Act.
-	reversals, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	reversals, err := svc.Calibrate(context.Background(), g)
 	// Assert: XOR on flags counts as a reversal.
 	if err != nil || reversals != 1 {
 		t.Fatalf("Calibrate = %d, %v; want 1, nil", reversals, err)
@@ -129,7 +131,7 @@ func TestCalibrateEmptyIsError(t *testing.T) {
 	svc := NewService(db, gateway.NewFake(nil), cfg)
 
 	// Act: no calibration items loaded.
-	_, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", g)
+	_, err := svc.Calibrate(context.Background(), g)
 	// Assert: explicit error, and admission was invalidated (never vacuous).
 	if err == nil {
 		t.Fatal("Calibrate succeeded on empty set; want error")
@@ -160,7 +162,7 @@ func TestRecheckRotatesAndKeepsAdmission(t *testing.T) {
 	svc := NewService(db, fake, cfg)
 
 	// Act: recheck 2 of 4 items.
-	reversals, err := svc.Recheck(context.Background(), schema.CaseInput{}, "", g, 2)
+	reversals, err := svc.Recheck(context.Background(), g, 2)
 	// Assert: only n calls, admission untouched.
 	if err != nil || reversals != 0 {
 		t.Fatalf("Recheck = %d, %v; want 0, nil", reversals, err)

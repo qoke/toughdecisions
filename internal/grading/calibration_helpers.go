@@ -24,29 +24,11 @@ type calibrationRow struct {
 	Scores     map[string]int `json:"scores"`
 }
 
-// calibrationItem is the grading view of a calibration item.
-type calibrationItem struct {
-	Key         string
-	Seat        string
-	Text        string
-	HumanScores string
-	HumanFlags  string
-}
-
-// toStoreItems adapts rotated slices back to store rows for gradeItems.
-// Only the fields gradeItems reads are populated.
-func toStoreItems(items []calibrationItem) []*store.CalibrationItem {
-	out := make([]*store.CalibrationItem, 0, len(items))
-	for _, it := range items {
-		out = append(out, &store.CalibrationItem{
-			ItemKey:         it.Key,
-			Seat:            it.Seat,
-			ResponseText:    it.Text,
-			HumanScoresJSON: it.HumanScores,
-			HumanFlagsJSON:  it.HumanFlags,
-		})
-	}
-	return out
+// resolvedItem pairs a calibration row with its resolved case context.
+type resolvedItem struct {
+	item       *store.CalibrationItem
+	Input      schema.CaseInput
+	Acceptance string
 }
 
 // invalidateAdmission sets admitted=false before re-calibration so a
@@ -84,15 +66,28 @@ func (s *Service) persistCalibration(grader *Grader, rows []calibrationRow, reve
 	return nil
 }
 
-// gradeItems grades each item with the calibration rubric (one R-13 retry
-// each) and computes the reversal test per item. It parses through the same
-// tolerant parseAbsoluteGrade as the Grade path, so an identical real-model
-// payload parses identically in both paths.
-func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptance string, grader *Grader, items []*store.CalibrationItem) ([]calibrationRow, int, error) {
-	rows := make([]calibrationRow, 0, len(items))
-	reversals := 0
+// gradeItems resolves each item's own case (stored case InputJSON decoded
+// exactly like harness.CaseInputFor, plus the owning family's
+// AcceptanceJSON), grades it with the calibration rubric (one R-13 retry
+// each), and computes the reversal test per item. It parses through the
+// same tolerant parseAbsoluteGrade as the Grade path, so an identical
+// real-model payload parses identically in both paths. A missing,
+// undecodable, or empty case fails closed: an empty CaseInput must never
+// quietly produce a 0 score.
+func (s *Service) gradeItems(ctx context.Context, grader *Grader, items []*store.CalibrationItem) ([]calibrationRow, int, error) {
+	resolved := make([]resolvedItem, 0, len(items))
 	for _, it := range items {
-		msgs, err := prompts.BuildCalibrationGrade(in, acceptance, it.Seat, it.ResponseText)
+		in, acceptance, err := s.caseContextForItem(it)
+		if err != nil {
+			return nil, 0, err
+		}
+		resolved = append(resolved, resolvedItem{item: it, Input: in, Acceptance: acceptance})
+	}
+	rows := make([]calibrationRow, 0, len(resolved))
+	reversals := 0
+	for _, rit := range resolved {
+		it := rit.item
+		msgs, err := prompts.BuildCalibrationGrade(rit.Input, rit.Acceptance, it.Seat, it.ResponseText)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -141,6 +136,48 @@ func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptanc
 		rows = append(rows, row)
 	}
 	return rows, reversals, nil
+}
+
+// caseContextForItem resolves one calibration item's own case: the stored
+// case InputJSON decoded exactly like harness.CaseInputFor, plus the owning
+// family's AcceptanceJSON. A missing case row, undecodable InputJSON, or an
+// empty CaseInput (no card content, no messages, no question) fails closed
+// — it must never silently grade a blank card into a 0 score.
+func (s *Service) caseContextForItem(it *store.CalibrationItem) (schema.CaseInput, string, error) {
+	var zero schema.CaseInput
+	if it == nil || strings.TrimSpace(it.CaseID) == "" {
+		key := ""
+		if it != nil {
+			key = it.ItemKey
+		}
+		return zero, "", errf("calibration %q has no case linkage: refusing blank case", key)
+	}
+	c, err := s.db.GetCase(it.CaseID)
+	if err != nil {
+		return zero, "", errf("calibration %q: load case: %v", it.ItemKey, err)
+	}
+	var in schema.CaseInput
+	if err := json.Unmarshal([]byte(c.InputJSON), &in); err != nil {
+		return zero, "", errf("calibration %q: decode case %q input: %v", it.ItemKey, c.CaseKey, err)
+	}
+	if caseInputEmpty(in) {
+		return zero, "", errf("calibration %q: case %q has empty input: refusing blank case", it.ItemKey, c.CaseKey)
+	}
+	acceptance := ""
+	if fam, err := s.db.GetFamily(c.FamilyID); err == nil {
+		acceptance = fam.AcceptanceJSON
+	}
+	return in, acceptance, nil
+}
+
+// caseInputEmpty reports whether a CaseInput carries no gradeable context:
+// no card content, no messages, and no question.
+func caseInputEmpty(in schema.CaseInput) bool {
+	if strings.TrimSpace(in.Question) != "" || len(in.Messages) > 0 {
+		return false
+	}
+	c := in.Card
+	return strings.TrimSpace(c.Decision+c.Context+c.Priorities+c.Unusual+c.History+c.Deadline+c.Style) == ""
 }
 
 func mean(scores map[string]int) float64 {
