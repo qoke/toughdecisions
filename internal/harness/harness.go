@@ -46,11 +46,13 @@ type Runner struct {
 
 // NewRunner builds a Runner. All arguments are required.
 func NewRunner(db *store.DB, gw gateway.Client, cfg *config.Config, log logx.Logger, m *models.Registry) *Runner {
-	return &Runner{
+	r := &Runner{
 		db: db, gw: gw, cfg: cfg, log: log, models: m,
 		grade: grading.NewService(db, gw, cfg),
 		stats: &RunStats{},
 	}
+	r.grade.SetModels(m)
+	return r
 }
 
 // DB exposes the store for later steps (compare, downstream, promotion).

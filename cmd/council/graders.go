@@ -211,6 +211,7 @@ func gradersCalibrate(args []string) int {
 	log := logx.New(cfg)
 	gw := gatewayFactory(cfg, log)
 	svc := grading.NewService(db, gw, cfg)
+	svc.SetModels(mreg)
 	blocked := false
 	for _, g := range targets {
 		reversals, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", (*grading.Grader)(g))
