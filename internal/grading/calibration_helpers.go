@@ -85,7 +85,9 @@ func (s *Service) persistCalibration(grader *Grader, rows []calibrationRow, reve
 }
 
 // gradeItems grades each item with the calibration rubric (one R-13 retry
-// each) and computes the reversal test per item.
+// each) and computes the reversal test per item. It parses through the same
+// tolerant parseAbsoluteGrade as the Grade path, so an identical real-model
+// payload parses identically in both paths.
 func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptance string, grader *Grader, items []*store.CalibrationItem) ([]calibrationRow, int, error) {
 	rows := make([]calibrationRow, 0, len(items))
 	reversals := 0
@@ -98,7 +100,7 @@ func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptanc
 		if err != nil {
 			return nil, 0, err
 		}
-		g, ok := schema.ParseLenient[schema.AbsoluteGrade](content)
+		g, ok := parseAbsoluteGrade(content)
 		if !ok {
 			retry := append(append([]gateway.Message{}, msgs...),
 				gateway.Message{Role: "user", Content: "Return only the JSON object."})
@@ -107,7 +109,7 @@ func (s *Service) gradeItems(ctx context.Context, in schema.CaseInput, acceptanc
 				return nil, 0, err
 			}
 			var ok2 bool
-			g, ok2 = schema.ParseLenient[schema.AbsoluteGrade](content)
+			g, ok2 = parseAbsoluteGrade(content)
 			if !ok2 {
 				return nil, 0, errf("grader %q returned unparseable calibration grade after one retry", grader.GraderKey)
 			}
