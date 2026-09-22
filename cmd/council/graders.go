@@ -17,7 +17,6 @@ import (
 	"github.com/qoke/toughdecisions/internal/logx"
 	"github.com/qoke/toughdecisions/internal/models"
 	"github.com/qoke/toughdecisions/internal/prompts"
-	"github.com/qoke/toughdecisions/internal/schema"
 	"github.com/qoke/toughdecisions/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -214,7 +213,7 @@ func gradersCalibrate(args []string) int {
 	svc.SetModels(mreg)
 	blocked := false
 	for _, g := range targets {
-		reversals, err := svc.Calibrate(context.Background(), schema.CaseInput{}, "", (*grading.Grader)(g))
+		reversals, err := svc.Calibrate(context.Background(), (*grading.Grader)(g))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "graders calibrate: %s: %v\n", g.GraderKey, err)
 			return exitError

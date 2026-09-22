@@ -89,7 +89,7 @@ func (r *Runner) CheckDrift(ctx context.Context) (map[string]int, []string, erro
 			continue
 		}
 		g := g
-		rev, err := r.grade.Recheck(ctx, emptyInput(), "", (*grading.Grader)(g), n)
+		rev, err := r.grade.Recheck(ctx, (*grading.Grader)(g), n)
 		if err != nil {
 			return nil, nil, fmt.Errorf("harness: recheck grader %q: %w", g.GraderKey, err)
 		}
@@ -522,8 +522,6 @@ func packActive(r *Runner) (*pack.Pack, error) {
 	}
 	return pk, nil
 }
-
-func emptyInput() schema.CaseInput { return schema.CaseInput{} }
 
 func poolJobs[T any](jobs []T, fn func(context.Context, int) error) []func(context.Context) error {
 	out := make([]func(context.Context) error, len(jobs))
