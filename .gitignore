@@ -13,4 +13,3 @@ cmd/council/main.exe
 bin/
 coverage.out
 coverage.html
-cmd/council/council.json
