@@ -465,7 +465,7 @@ council db migrate | council db prune --older-than <days>      # production rows
 council pack init --file config/pack.yaml | show [--id] | publish --run <id> --candidate <key> [--force] | rollback
 council cases validate | load
 council graders calibrate [--grader <key> | --all] | status
-council harness weekly [...] | sentinel | screen | compare [--fresh] | downstream | report --run <id>
+council harness weekly [...] | sentinel | screen | compare --candidate <key> [--fresh] | downstream --candidate <key> --run <id> | report --run <id>
 council flags list [--run <id>] | confirm <id> --note "…" | dismiss <id> --note "…"
 council feedback summary --days 7
 ```
