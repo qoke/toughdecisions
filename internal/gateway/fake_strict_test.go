@@ -93,8 +93,8 @@ func TestFakeEnforcesSubstitutionOnBodyModel(t *testing.T) {
 // with a 400-style ErrGateway, mirroring OpenAI-strict deployments.
 func TestFakeRejectsNonStrictSchema(t *testing.T) {
 	ctx := context.Background()
-	lax := json.RawMessage(`{"type":"object","properties":{"a":{"type":"object","properties":{"b":{"type":"string"}}}}}`)
-	strict := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"a":{"type":"object","additionalProperties":false,"properties":{"b":{"type":"string"}}}}}`)
+	lax := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"type":"object","additionalProperties":false,"required":["b"],"properties":{"b":{"type":"string"}}}}}`)
+	missingAP := json.RawMessage(`{"type":"object","properties":{"a":{"type":"object","properties":{"b":{"type":"string"}}}}}`)
 	newReq := func(s json.RawMessage, strictMode bool) ChatRequest {
 		return ChatRequest{Model: "m",
 			ResponseFormat: &ResponseFormat{Type: "json_schema", SchemaName: "v", Schema: s, Strict: strictMode}}
@@ -102,7 +102,7 @@ func TestFakeRejectsNonStrictSchema(t *testing.T) {
 	f := NewFake(map[string][]Step{"m": {{Content: "x"}, {Content: "x"}, {Content: "x"}, {Content: "x"}, {Content: "x"}}})
 
 	// Nested object missing additionalProperties:false is rejected.
-	_, err := f.Chat(ctx, newReq(lax, true))
+	_, err := f.Chat(ctx, newReq(missingAP, true))
 	if !errors.Is(err, ErrGateway) {
 		t.Fatalf("err = %v, want ErrGateway", err)
 	}
@@ -110,11 +110,11 @@ func TestFakeRejectsNonStrictSchema(t *testing.T) {
 		t.Fatalf("err = %v, want 400-style message", err)
 	}
 	// Strict-conformant schema passes.
-	if _, err := f.Chat(ctx, newReq(strict, true)); err != nil {
+	if _, err := f.Chat(ctx, newReq(lax, true)); err != nil {
 		t.Fatalf("conformant schema rejected: %v", err)
 	}
 	// Strict=false passes lax schemas through (mirrors real behaviour).
-	if _, err := f.Chat(ctx, newReq(lax, false)); err != nil {
+	if _, err := f.Chat(ctx, newReq(missingAP, false)); err != nil {
 		t.Fatalf("non-strict request rejected: %v", err)
 	}
 	// Non-schema formats are untouched.
@@ -127,6 +127,30 @@ func TestFakeRejectsNonStrictSchema(t *testing.T) {
 	f3.SkipStrictSchemaCheck = true
 	if _, err := f3.Chat(ctx, newReq(lax, true)); err != nil {
 		t.Fatalf("opt-out rejected: %v", err)
+	}
+}
+
+// TestFakeRejectsMissingRequired pins the strict required-superset rule in
+// the transport gate: a strict json_schema request whose object node omits a
+// "properties" key from "required" (the live "Missing 'caution'" 400) is
+// rejected with a 400-style ErrGateway. Reverting the fake's required check
+// lets the D1 regression through offline.
+func TestFakeRejectsMissingRequired(t *testing.T) {
+	ctx := context.Background()
+	missingCaution := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["present"],"properties":{"present":{"type":"boolean"},"caution":{"type":"string"}}}`)
+	full := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["present","caution"],"properties":{"present":{"type":"boolean"},"caution":{"type":"string"}}}`)
+	newReq := func(s json.RawMessage, strictMode bool) ChatRequest {
+		return ChatRequest{Model: "m",
+			ResponseFormat: &ResponseFormat{Type: "json_schema", SchemaName: "v", Schema: s, Strict: strictMode}}
+	}
+	f := NewFake(map[string][]Step{"m": {{Content: "x"}, {Content: "x"}}})
+	if _, err := f.Chat(ctx, newReq(missingCaution, true)); !errors.Is(err, ErrGateway) {
+		t.Fatalf("err = %v, want ErrGateway for missing required", err)
+	} else if !strings.Contains(err.Error(), "400") {
+		t.Fatalf("err = %v, want 400-style message", err)
+	}
+	if _, err := f.Chat(ctx, newReq(full, true)); err != nil {
+		t.Fatalf("full required set rejected: %v", err)
 	}
 }
 

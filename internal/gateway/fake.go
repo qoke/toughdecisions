@@ -32,8 +32,9 @@ type Step struct {
 //   - strict structured-output conformance is enforced: a json_schema request
 //     with Strict=true whose schema has any object node (explicit
 //     "type":"object", or implicit via "properties"/"required") lacking
-//     "additionalProperties":false is rejected with a 400-style error wrapping
-//     ErrGateway, mirroring OpenAI-strict 400s.
+//     "additionalProperties":false, or omitting any "properties" key from
+//     "required", is rejected with a 400-style error wrapping ErrGateway,
+//     mirroring OpenAI-strict 400s.
 //
 // Each dimension is an opt-out switch for tests deliberately exercising
 // something else: SkipSubstitutionCheck, SkipStrictSchemaCheck, or
@@ -154,9 +155,10 @@ func checkPrefixes(model string, prefixes []string, resp ChatResponse) error {
 
 // checkStrictSchema rejects non-strict-conformant schemas the way
 // OpenAI-strict deployments do: a json_schema request with Strict=true must
-// have additionalProperties:false on every object node, checked recursively.
-// Non-schema requests, Strict=false, empty or unparseable schemas pass
-// through untouched (the fake mirrors real behaviour, never invents rules).
+// have additionalProperties:false on every object node AND every key of
+// "properties" listed in "required" (checked recursively). Non-schema
+// requests, Strict=false, empty or unparseable schemas pass through
+// untouched (the fake mirrors real behaviour, never invents rules).
 func checkStrictSchema(rf *ResponseFormat) error {
 	if rf == nil || rf.Type != "json_schema" || !rf.Strict {
 		return nil
@@ -170,6 +172,9 @@ func checkStrictSchema(rf *ResponseFormat) error {
 	}
 	if path := firstNonStrictObject(v); path != "" {
 		return fmt.Errorf("gateway: status 400: schema at %s: object schemas require additionalProperties=false in strict mode: %w", path, ErrGateway)
+	}
+	if path := firstMissingRequired(v); path != "" {
+		return fmt.Errorf("gateway: status 400: schema at %s: 'required' is required to be supplied and to be an array including every key in properties in strict mode: %w", path, ErrGateway)
 	}
 	return nil
 }
@@ -222,6 +227,47 @@ func isStrictObjectNode(n map[string]any) bool {
 		return true
 	}
 	return false
+}
+
+// firstMissingRequired returns the path of the first object node whose
+// "properties" keys are not all listed in "required", or "" when every
+// object node satisfies the strict required-superset rule.
+func firstMissingRequired(v any) string {
+	return walkRequired(v, "$")
+}
+
+// walkRequired depth-first walks a decoded schema.
+func walkRequired(v any, path string) string {
+	switch n := v.(type) {
+	case map[string]any:
+		if props, ok := n["properties"].(map[string]any); ok && isStrictObjectNode(n) {
+			have := map[string]bool{}
+			if existing, ok := n["required"].([]any); ok {
+				for _, r := range existing {
+					if s, ok := r.(string); ok {
+						have[s] = true
+					}
+				}
+			}
+			for name := range props {
+				if !have[name] {
+					return path
+				}
+			}
+		}
+		for k, child := range n {
+			if p := walkRequired(child, path+"."+k); p != "" {
+				return p
+			}
+		}
+	case []any:
+		for idx, child := range n {
+			if p := walkRequired(child, fmt.Sprintf("%s[%d]", path, idx)); p != "" {
+				return p
+			}
+		}
+	}
+	return ""
 }
 
 // deploymentIDFor derives a deterministic 64-hex deployment hash from the
