@@ -37,7 +37,9 @@ graders:
     max_output_tokens: 2000
 
   # Substitute grader: picked only on self-grading conflicts, so its family
-  # must differ from the response family at call time.
+  # must differ from the response family at call time. It must use a model
+  # with strict json_schema support: graders without schema enforcement are
+  # rejected, never downgraded to json_object.
   - key: substitute-a
     model: council-view-c
     family: google

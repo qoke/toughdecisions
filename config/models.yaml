@@ -15,7 +15,7 @@ models:
   - id: council-view-c
     family: google
     expected_response_model_prefixes: ["gemini-view-c-2026"]
-    supports: {temperature: true, top_p: true, reasoning_effort: false, json_schema: false, json_object: true}
+    supports: {temperature: true, top_p: true, reasoning_effort: false, json_schema: true, json_object: true}
   - id: council-judge-a
     family: openai
     expected_response_model_prefixes: ["gpt-judge-a-2026"]

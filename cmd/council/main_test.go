@@ -103,6 +103,10 @@ func writeModelsFile(t *testing.T) string {
 	p := t.TempDir() + "/models.yaml"
 	content := "models:\n" +
 		"  - id: m1\n    family: openai\n    expected_response_model_prefixes: [\"m1\"]\n" +
+		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
+		"  - id: mfail\n    family: openai\n    expected_response_model_prefixes: [\"mfail\"]\n" +
+		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
+		"  - id: mok\n    family: anthropic\n    expected_response_model_prefixes: [\"mok\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n"
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)

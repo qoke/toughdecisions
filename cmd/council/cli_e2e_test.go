@@ -577,6 +577,7 @@ cases:
 		"  - id: mgb\n    family: anthropic\n    expected_response_model_prefixes: [\"mgb\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
 		"  - id: mgs\n    family: other\n    expected_response_model_prefixes: [\"mgs\"]\n" +
+		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
 		"  - id: mgsub\n    family: google\n    expected_response_model_prefixes: [\"mgsub\"]\n" +
 		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n"
 	mp := t.TempDir() + "/models.yaml"
