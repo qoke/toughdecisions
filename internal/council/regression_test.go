@@ -151,7 +151,7 @@ func TestResponseFormatJSONObjectOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	waitRequestState(t, fx.db, id, "complete", 10*time.Second)
+	waitRequestState(t, fx.db, id, "complete_partial", 10*time.Second)
 	byModel := map[string]*gateway.ResponseFormat{}
 	for i, c := range fx.fake.Calls {
 		rf := fx.fake.Calls[i].ResponseFormat
@@ -160,8 +160,8 @@ func TestResponseFormatJSONObjectOnly(t *testing.T) {
 	if byModel["v-poss"] == nil || byModel["v-poss"].Type != "json_schema" || !byModel["v-poss"].Strict {
 		t.Fatalf("v-poss format = %+v, want strict json_schema", byModel["v-poss"])
 	}
-	if byModel["v-persp"] == nil || byModel["v-persp"].Type != "json_object" {
-		t.Fatalf("v-persp format = %+v, want json_object", byModel["v-persp"])
+	if _, ok := byModel["v-persp"]; ok {
+		t.Fatalf("v-persp format = %+v, want no call (fail closed without strict json_schema)", byModel["v-persp"])
 	}
 	if byModel["v-stress"] != nil {
 		t.Fatalf("v-stress format = %+v, want absent", byModel["v-stress"])
