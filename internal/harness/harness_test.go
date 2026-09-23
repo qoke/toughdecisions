@@ -859,8 +859,8 @@ func TestAccessorsAndHelpers(t *testing.T) {
 	if got := responseFormatFor(fx.runner.Models(), "v-poss", pack.SeatPossibility); got == nil || got.Type != "json_schema" {
 		t.Fatalf("responseFormatFor v-poss = %+v; want json_schema", got)
 	}
-	if got := responseFormatFor(fx.runner.Models(), "council-basic", pack.SeatPossibility); got == nil || got.Type != "json_object" {
-		t.Fatalf("responseFormatFor council-basic = %+v; want json_object", got)
+	if got := responseFormatFor(fx.runner.Models(), "council-basic", pack.SeatPossibility); got != nil {
+		t.Fatalf("responseFormatFor council-basic = %+v; want nil (no json_object fallback)", got)
 	}
 	if got := responseFormatFor(fx.runner.Models(), "unknown-model", pack.SeatPossibility); got != nil {
 		t.Fatalf("responseFormatFor unknown = %+v; want nil", got)

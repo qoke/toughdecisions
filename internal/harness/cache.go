@@ -51,6 +51,9 @@ func (r *Runner) GenerateResponse(ctx context.Context, g GenRequest) (*GenResult
 	if !g.Seat.Valid() {
 		return nil, fmt.Errorf("harness: unknown seat %q", string(g.Seat))
 	}
+	if requiresStrictSchema(r.models, g.SeatCfg.Model) {
+		return nil, fmt.Errorf("harness: seat %q model %q does not support strict structured outputs: %w", string(g.Seat), g.SeatCfg.Model, gateway.ErrUnsupportedSetting)
+	}
 	if err := r.models.ValidateSettings(g.SeatCfg); err != nil {
 		return nil, err
 	}
@@ -234,10 +237,25 @@ func nonZeroMaxTokens(cfg pack.SeatConfig, seat pack.Seat) int {
 	return pack.DefaultMaxOutputTokens(seat)
 }
 
-// responseFormatFor selects strict json_schema when supported, else
-// json_object when supported, else nil.
+// requiresStrictSchema reports whether the seat model lacks strict
+// json_schema support. A nil registry or unknown model fails closed.
+func requiresStrictSchema(m *models.Registry, model string) bool {
+	if m == nil {
+		return true
+	}
+	_, _, _, jsonSchema, _ := m.Supports(model)
+	return !jsonSchema
+}
+
+// responseFormatFor selects strict json_schema when supported, else nil.
+// There is intentionally no json_object fallback: an unenforced seat shape
+// is a degraded result, so GenerateResponse fails closed before any
+// gateway call.
 func responseFormatFor(m *models.Registry, model string, seat pack.Seat) *gateway.ResponseFormat {
-	_, _, _, jsonSchema, jsonObject := m.Supports(model)
+	if m == nil {
+		return nil
+	}
+	_, _, _, jsonSchema, _ := m.Supports(model)
 	name := "view"
 	schemaJSON := schema.ViewJSONSchema
 	if seat == pack.SeatJudge {
@@ -250,8 +268,6 @@ func responseFormatFor(m *models.Registry, model string, seat pack.Seat) *gatewa
 			Type: "json_schema", SchemaName: name,
 			Schema: json.RawMessage(schemaJSON), Strict: true,
 		}
-	case jsonObject:
-		return &gateway.ResponseFormat{Type: "json_object"}
 	default:
 		return nil
 	}
