@@ -2,6 +2,11 @@ BINARY  := council
 PKG     := ./cmd/council
 GOFLAGS ?= -mod=readonly
 
+# Two test binaries with eight procs each cap tests at 16 cores; the defaults
+# saturate the 64-core dev host.
+TEST_ENV := GOMAXPROCS=8
+TEST_JOBS := -p 2
+
 .PHONY: help fmt fmt-check vet build test test-race cover lint ci bootstrap
 
 help: ## Show available targets
@@ -21,13 +26,13 @@ build: ## Build the council binary into bin/
 	go build -o bin/$(BINARY) $(PKG)
 
 test: ## Run the test suite
-	go test ./... -count=1
+	$(TEST_ENV) go test $(TEST_JOBS) ./... -count=1
 
 test-race: ## Run the test suite with the race detector
-	go test ./... -race -count=1
+	$(TEST_ENV) go test $(TEST_JOBS) ./... -race -count=1
 
 cover: ## Run tests with a coverage profile and print the total
-	go test ./... -count=1 -coverprofile=coverage.out
+	$(TEST_ENV) go test $(TEST_JOBS) ./... -count=1 -coverprofile=coverage.out
 	go tool cover -func=coverage.out | tail -n 1
 
 lint: ## Run golangci-lint if installed (otherwise skip)
