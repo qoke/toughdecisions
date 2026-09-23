@@ -337,7 +337,12 @@ func TestRunSupersedeCancelsAndPreserves(t *testing.T) {
 			{Content: testJudgeJSON, ModelReturned: "j1"},
 		},
 	}
-	fx := setupFixture(t, scripts, "100ms", "5s")
+	// 10s views/judge deadlines (not the 100ms fixture default): this test
+	// verifies supersede semantics and asserts the new run is "complete",
+	// which requires all views included; under full-suite load the 100ms
+	// default can fire the deadline-triggered judge with missing seats,
+	// yielding the designed complete_partial outcome as a false failure.
+	fx := setupFixture(t, scripts, "10s", "10s")
 	oldID, err := fx.runner.Run(context.Background(), testCreateRequest(fx.thread))
 	if err != nil {
 		t.Fatalf("Run old: %v", err)
