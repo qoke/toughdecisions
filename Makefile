@@ -2,8 +2,12 @@ BINARY  := council
 PKG     := ./cmd/council
 GOFLAGS ?= -mod=readonly
 
-# Two test binaries with eight procs each cap tests at 16 cores; the defaults
-# saturate the 64-core dev host.
+# CPU-count cap, NOT core pinning: 2 test binaries × 8 procs = at most 16 CPUs.
+# Go schedules work; the kernel load-balances threads across all cores.
+# Do not use taskset/numactl. If affinity is genuinely required, select cores
+# dynamically by current load, not a fixed list.
+# Defaults (NumCPU package binaries, each GOMAXPROCS=NumCPU) saturate
+# the 64-core dev host.
 TEST_ENV := GOMAXPROCS=8
 TEST_JOBS := -p 2
 

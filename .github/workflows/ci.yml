@@ -13,7 +13,7 @@ permissions:
 # stay -mod=readonly in CI so a build can never silently rewrite go.mod/go.sum.
 env:
   GOFLAGS: -mod=readonly
-  GOMAXPROCS: "8"
+  GOMAXPROCS: "8" # CPU-count cap, not core affinity; keeps CI/dev parity.
 
 jobs:
   test:
