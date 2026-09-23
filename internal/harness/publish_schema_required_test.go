@@ -48,11 +48,36 @@ func TestPublishRefusesSchemaLessSeat(t *testing.T) {
 	}
 	cfg := pack.SeatConfig{Seat: pack.SeatPossibility, Model: "council-basic", Family: "other"}
 	raw, _ := json.Marshal(cfg)
-	row := &store.Candidate{
-		CandidateKey: "cand-basic", Seat: "possibility", ConfigJSON: string(raw),
+	if _, err := fx.db.UpsertCandidate("run-pub-schema", "cand-basic", "possibility", string(raw), "cfg-pub-schema"); err != nil {
+		t.Fatalf("UpsertCandidate: %v", err)
+	}
+	row, err := fx.db.GetCandidateByKey("run-pub-schema", "cand-basic")
+	if err != nil {
+		t.Fatalf("GetCandidateByKey: %v", err)
 	}
 	if _, err := fx.runner.seatsForPublish(cur, row); !errors.Is(err, gateway.ErrUnsupportedSetting) {
 		t.Fatalf("seatsForPublish err = %v; want ErrUnsupportedSetting", err)
+	}
+
+	// Publish-level AC: a rejected publish wrote no baselines and no pack row.
+	before, err := pack.Active(fx.db)
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if _, err := fx.runner.Publish(context.Background(), PublishOptions{RunID: "run-pub-schema", CandidateKey: "cand-basic"}); err == nil {
+		t.Fatal("Publish schema-less candidate: want error, got nil")
+	}
+	if n, err := fx.runner.countBaselines(fx.pk.ID); err != nil {
+		t.Fatalf("countBaselines: %v", err)
+	} else if n != 0 {
+		t.Fatalf("baselines after rejected publish = %d, want 0", n)
+	}
+	after, err := pack.Active(fx.db)
+	if err != nil {
+		t.Fatalf("Active after: %v", err)
+	}
+	if after.ID != before.ID {
+		t.Fatalf("active pack changed to %s after rejected publish, want %s", after.ID, before.ID)
 	}
 }
 
