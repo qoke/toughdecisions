@@ -1,9 +1,11 @@
 package main
 
 import (
+	"net"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoke/toughdecisions/internal/config"
 	"github.com/qoke/toughdecisions/internal/logx"
@@ -212,18 +214,127 @@ func TestServeConfigErrorAndPackInitBranches(t *testing.T) {
 }
 
 func TestServeHTTPBindError(t *testing.T) {
-	// serveHTTP with an unroutable listen address fails fast without binding.
-	t.Setenv("COUNCIL_SERVER_LISTEN", "127.0.0.1:1")
+	// Fails at bind (already-in-use held listener) so it never blocks in
+	// ListenAndServe, even as root where privileged ports bind fine.
 	t.Setenv("COUNCIL_DB_PATH", t.TempDir()+"/c.db")
 	t.Setenv("COUNCIL_MODELS_FILE", writeModelsFile(t))
+	ln := holdLoopbackPort(t)
+	defer ln.Close()
+	// Load config AFTER pointing listen at the held port: serveHTTP must
+	// attempt the occupied port (fast EADDRINUSE), never the default.
+	t.Setenv("COUNCIL_SERVER_LISTEN", ln.Addr().String())
 	cfg, err := loadTestConfig()
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
 	log := newTestLog(cfg)
-	// Missing pack dir is fine; bind to privileged port 1 fails.
 	if err := serveHTTP(cfg, log); err == nil {
-		t.Fatal("serveHTTP privileged port: want error")
+		t.Fatal("serveHTTP occupied port: want error")
+	}
+}
+
+// holdLoopbackPort binds and holds an ephemeral loopback port so serveHTTP's
+// ListenAndServe fails fast with EADDRINUSE even as root (port 1 binds fine
+// as root and would block forever).
+func holdLoopbackPort(t *testing.T) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen ephemeral loopback: %v", err)
+	}
+	return ln
+}
+
+// holdCasePort holds an ephemeral port on the case's host so a wantOK bind
+// keeps the case's loopback/non-loopback character while still failing fast
+// with EADDRINUSE even as root. "localhost" may resolve to ::1 while the
+// held listener is 127.0.0.1 (or vice versa), so it holds both loopbacks.
+func holdCasePort(t *testing.T, listen string) net.Listener {
+	t.Helper()
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		t.Fatalf("split %q: %v", listen, err)
+	}
+	if host == "localhost" {
+		ln4, err4 := net.Listen("tcp", "127.0.0.1:0")
+		ln6, err6 := net.Listen("tcp", "[::1]:0")
+		if err4 != nil && err6 != nil {
+			t.Fatalf("listen localhost loopbacks: %v / %v", err4, err6)
+		}
+		if err4 == nil && err6 == nil {
+			_, p4, _ := net.SplitHostPort(ln4.Addr().String())
+			_, p6, _ := net.SplitHostPort(ln6.Addr().String())
+			if p4 == p6 {
+				// Same ephemeral port on both families: one held
+				// listener fails the bind regardless of which family
+				// "localhost" resolves to.
+				t.Cleanup(func() { ln6.Close() })
+				return ln4
+			}
+			// Different ports: free both and retry for a collision.
+			// Ephemeral collisions are rare; a few tries suffice.
+			ln4.Close()
+			ln6.Close()
+			for range 25 {
+				a, e4 := net.Listen("tcp", "127.0.0.1:0")
+				b, e6 := net.Listen("tcp", "[::1]:0")
+				if e4 != nil || e6 != nil {
+					if a != nil {
+						a.Close()
+					}
+					if b != nil {
+						b.Close()
+					}
+					continue
+				}
+				_, pa, _ := net.SplitHostPort(a.Addr().String())
+				_, pb, _ := net.SplitHostPort(b.Addr().String())
+				if pa == pb {
+					t.Cleanup(func() { b.Close() })
+					return a
+				}
+				a.Close()
+				b.Close()
+			}
+			// Fall back to holding v4 only: the bind may succeed as
+			// root when localhost resolves to ::1, but the timeout
+			// guard in serveHTTPWithTimeout still prevents a hang.
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listen localhost fallback: %v", err)
+			}
+			return ln
+		}
+		if err4 == nil {
+			return ln4
+		}
+		return ln6
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Fatalf("listen ephemeral on %q: %v", host, err)
+	}
+	return ln
+}
+
+// mustTestConfig loads config or fails the test.
+func mustTestConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg, err := loadTestConfig()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	return cfg
+}
+
+func serveHTTPWithTimeout(cfg *config.Config, log logx.Logger, d time.Duration) error {
+	errCh := make(chan error, 1)
+	go func() { errCh <- serveHTTP(cfg, log) }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(d):
+		return nil
 	}
 }
 
@@ -238,26 +349,52 @@ func TestServeHTTPRefusesNonLoopbackWithoutToken(t *testing.T) {
 		{"unspecified v4 is non-loopback", "0.0.0.0:8080", "", false},
 		{"unspecified v6 is non-loopback", "[::]:8080", "", false},
 		{"whitespace token counts as unset", "0.0.0.0:8080", "   ", false},
-		{"token allows non-loopback check to pass", "0.0.0.0:1", "tok", true},
-		{"loopback v4 no token ok", "127.0.0.1:1", "", true},
-		{"localhost resolves loopback", "localhost:1", "", true},
+		{"token allows non-loopback check to pass", "0.0.0.0:8080", "tok", true},
+		{"loopback v4 no token ok", "127.0.0.1:8080", "", true},
+		{"localhost resolves loopback", "localhost:8080", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("COUNCIL_SERVER_LISTEN", tc.listen)
 			t.Setenv("COUNCIL_SERVER_TOKEN", tc.token)
 			t.Setenv("COUNCIL_DB_PATH", t.TempDir()+"/c.db")
 			t.Setenv("COUNCIL_MODELS_FILE", writeModelsFile(t))
-			cfg, err := loadTestConfig()
-			if err != nil {
-				t.Fatalf("config: %v", err)
+			log := newTestLog(mustTestConfig(t))
+			// wantOK cases must reach the bind: Setenv BEFORE config
+			// load (config reads env at Load), holding the port so
+			// ListenAndServe fails fast with EADDRINUSE even as root.
+			// The held listener keeps the case's host so the
+			// loopback/non-loopback character of the case is preserved.
+			listen := tc.listen
+			var held net.Listener
+			if tc.wantOK {
+				held = holdCasePort(t, tc.listen)
+				defer held.Close()
+				// Keep the case's host (e.g. "localhost" must still
+				// exercise DNS resolution in isLoopbackListen); only
+				// swap in the held ephemeral port.
+				_, port, err := net.SplitHostPort(held.Addr().String())
+				if err != nil {
+					t.Fatalf("split held addr: %v", err)
+				}
+				host, _, err := net.SplitHostPort(tc.listen)
+				if err != nil {
+					t.Fatalf("split %q: %v", tc.listen, err)
+				}
+				listen = net.JoinHostPort(host, port)
 			}
-			log := newTestLog(cfg)
-			// Port 1 fails at bind (permission) so any error there means the
+			t.Setenv("COUNCIL_SERVER_LISTEN", listen)
+			cfg := mustTestConfig(t)
+			if cfg.ServerListen() != listen {
+				t.Fatalf("ServerListen() = %q, want %q", cfg.ServerListen(), listen)
+			}
+			// The held port fails at bind, so any error there means the
 			// token gate passed; only the refusal error means it did not.
-			err = serveHTTP(cfg, log)
+			// wantOK cases assert the gate passed: refusal absent, bind
+			// error present. A timeout guard keeps a root bind from
+			// hanging the suite in the (impossible) success path.
+			err := serveHTTPWithTimeout(cfg, log, 10*time.Second)
 			if err == nil {
-				t.Fatal("serveHTTP: want error (bind to port 1 must fail)")
+				t.Fatal("serveHTTP: want error (bind must fail)")
 			}
 			refused := strings.Contains(err.Error(), "server_token")
 			if !tc.wantOK && !refused {
