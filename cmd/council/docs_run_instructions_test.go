@@ -5,29 +5,33 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
 // TestDocsRunInstructionsAreExecutable guards the documented bootstrap
-// surfaces — the fenced ```sh blocks in README.md and the "Bootstrap
-// sequence (README)" restatement in DEVELOPMENT_PLAN.md — so the copy-paste
-// commands stay executable as written. Per surface it asserts that the
-// council binary is obtained before it is invoked, that no tracked
-// doc/build file documents the forbidden single-file `go run` form, and
-// that `mkdir -p data` precedes the first `db migrate`. Every failure
-// names file:line.
+// surfaces — the fenced ```sh blocks in README.md that invoke council plus
+// the "Bootstrap sequence (README)" restatement in DEVELOPMENT_PLAN.md —
+// so the copy-paste commands stay executable as written. Per surface it
+// asserts that the council binary is obtained before it is invoked, that
+// `make build` precedes the first `db migrate`, and — only for surfaces
+// that actually invoke `db migrate` — that `mkdir -p data` precedes it. It
+// also asserts that no discovered doc/build file documents the forbidden
+// single-file `go run` form. Doc/build files are discovered by walking
+// (repo-root *.md, Makefile, Dockerfile, .github/workflows/*), never by a
+// hardcoded name list. Every failure names file:line.
 func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 	root := shippedRepoRoot(t)
 
-	// (b) No tracked doc/build file may contain `go run` followed by a
+	// (b) No discovered doc/build file may contain `go run` followed by a
 	// token ending in `.go` (e.g. `go run cmd/council/main.go`,
 	// `go run *.go`). The package form `go run ./cmd/council` does not
 	// match and is allowed.
 	goRunFileForm := regexp.MustCompile(`\bgo\s+run\s+\S+\.go\b`)
-	for _, name := range []string{"README.md", "DEVELOPMENT_PLAN.md", "Makefile", "Dockerfile"} {
+	for _, name := range docsDocBuildFiles(t, root) {
 		name := name
-		t.Run("no-single-file-go-run/"+name, func(t *testing.T) {
+		t.Run("no-single-file-go-run/"+docsSubtestName(name), func(t *testing.T) {
 			for i, line := range docsReadFile(t, root, name) {
 				if goRunFileForm.MatchString(line) {
 					t.Errorf("%s:%d: forbidden single-file go run form: %s",
@@ -47,8 +51,56 @@ func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 			t.Run("mkdir-data-before-db-migrate", func(t *testing.T) {
 				checkDocsDataProvisioning(t, surf)
 			})
+			t.Run("make-build-before-db-migrate", func(t *testing.T) {
+				checkDocsBuildBeforeMigrate(t, surf)
+			})
 		})
 	}
+}
+
+// docsDocBuildFiles discovers the doc/build files the guard covers by
+// walking narrowly: every repo-root *.md file, plus Makefile and
+// Dockerfile when present, plus every file directly under
+// .github/workflows. It never descends into subtrees, so testdata/vendor
+// trees cannot cause false positives. It fails loudly when the walk finds
+// nothing — a guard with no inputs proves nothing.
+func docsDocBuildFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read repo root: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	for _, name := range []string{"Makefile", "Dockerfile"} {
+		if st, err := os.Stat(filepath.Join(root, name)); err == nil && !st.IsDir() {
+			out = append(out, name)
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, ".github", "workflows")); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			out = append(out, filepath.Join(".github", "workflows", e.Name()))
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf(".: no doc/build files discovered")
+	}
+	sort.Strings(out)
+	return out
+}
+
+// docsSubtestName maps a repo-relative file path to a t.Run-safe name:
+// slashes would split the name into a hierarchy, so they become dashes.
+func docsSubtestName(name string) string {
+	return strings.ReplaceAll(name, "/", "-")
 }
 
 // docsSurface is one documented bootstrap surface: a contiguous run of
@@ -62,13 +114,16 @@ type docsSurface struct {
 }
 
 // docsBootstrapSurfaces extracts the documented bootstrap surfaces: every
-// fenced ```sh block in README.md plus the "Bootstrap sequence (README)"
-// restatement line in DEVELOPMENT_PLAN.md. It fails the test loudly when
-// no surface can be found — an empty scan proves nothing.
+// fenced ```sh block in README.md that invokes council plus the
+// "Bootstrap sequence (README)" restatement line in DEVELOPMENT_PLAN.md.
+// A fence that never invokes council is not a bootstrap surface and is
+// skipped. It fails the test loudly when no surface can be found — an
+// empty scan proves nothing.
 func docsBootstrapSurfaces(t *testing.T, root string) []docsSurface {
 	t.Helper()
 	var out []docsSurface
 
+	councilRe := regexp.MustCompile("(^|[\\s`(])((\\./)?bin/)?council(\\s|$)")
 	readme := docsReadFile(t, root, "README.md")
 	blocks := 0
 	for i := 0; i < len(readme); i++ {
@@ -83,17 +138,31 @@ func docsBootstrapSurfaces(t *testing.T, root string) []docsSurface {
 		if j >= len(readme) {
 			t.Fatalf("README.md:%d: unterminated ```sh fence", start)
 		}
+		body := readme[start:j]
+		invokes := false
+		for _, line := range body {
+			if docsIsComment(line) {
+				continue
+			}
+			if councilRe.MatchString(line) {
+				invokes = true
+				break
+			}
+		}
+		i = j
+		if !invokes {
+			continue
+		}
 		blocks++
 		out = append(out, docsSurface{
 			name:  fmt.Sprintf("README.md/sh-block-%d", blocks),
 			file:  "README.md",
 			first: start + 1,
-			lines: readme[start:j],
+			lines: body,
 		})
-		i = j
 	}
 	if blocks == 0 {
-		t.Fatalf("README.md:1: no ```sh bootstrap blocks found")
+		t.Fatalf("README.md:1: no ```sh bootstrap blocks invoking council found")
 	}
 
 	plan := docsReadFile(t, root, "DEVELOPMENT_PLAN.md")
@@ -151,10 +220,12 @@ func checkDocsObtainBinary(t *testing.T, surf docsSurface) {
 		surf.file, surf.first+first)
 }
 
-// checkDocsDataProvisioning fails, naming file:line, when a surface lacks
-// `mkdir -p data` before its first non-comment `db migrate` invocation —
-// either the mkdir is absent, the migration is absent, or they are
-// misordered (within or across lines).
+// checkDocsDataProvisioning fails, naming file:line, when a surface that
+// actually invokes `db migrate` lacks `mkdir -p data` before its first
+// non-comment `db migrate` — either the mkdir is absent or they are
+// misordered (within or across lines). A surface with no `db migrate`
+// invocation passes: the mkdir-before-migrate check applies only to
+// fences that actually invoke the migration.
 func checkDocsDataProvisioning(t *testing.T, surf docsSurface) {
 	t.Helper()
 	mkdirLine, mkdirCol := -1, -1
@@ -176,14 +247,45 @@ func checkDocsDataProvisioning(t *testing.T, surf docsSurface) {
 	}
 	switch {
 	case migrateLine < 0:
-		t.Errorf("%s:%d: bootstrap surface has no `db migrate` invocation",
-			surf.file, surf.first)
+		return
 	case mkdirLine < 0:
 		t.Errorf("%s:%d: `mkdir -p data` missing before this first `db migrate`",
 			surf.file, surf.first+migrateLine)
 	case mkdirLine > migrateLine || (mkdirLine == migrateLine && mkdirCol > migrateCol):
 		t.Errorf("%s:%d: `mkdir -p data` must precede first `db migrate` at %s:%d",
 			surf.file, surf.first+mkdirLine, surf.file, surf.first+migrateLine)
+	}
+}
+
+// checkDocsBuildBeforeMigrate fails, naming file:line, when a surface
+// shows `db migrate` without a `make build` step before it: the bootstrap
+// block must build the council binary before migrating the store. Comment
+// lines never count as build steps.
+func checkDocsBuildBeforeMigrate(t *testing.T, surf docsSurface) {
+	t.Helper()
+	buildLine := -1
+	migrateLine := -1
+	for i, line := range surf.lines {
+		if docsIsComment(line) {
+			continue
+		}
+		if buildLine < 0 && strings.Contains(line, "make build") {
+			buildLine = i
+		}
+		if migrateLine < 0 && strings.Contains(line, "db migrate") {
+			migrateLine = i
+		}
+	}
+	if migrateLine < 0 {
+		return
+	}
+	switch {
+	case buildLine < 0:
+		t.Errorf("%s:%d: `make build` missing before this `db migrate`",
+			surf.file, surf.first+migrateLine)
+	case buildLine > migrateLine:
+		t.Errorf("%s:%d: `make build` must precede `db migrate` at %s:%d",
+			surf.file, surf.first+buildLine, surf.file, surf.first+migrateLine)
 	}
 }
 
