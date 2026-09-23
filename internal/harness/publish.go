@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/qoke/toughdecisions/internal/gateway"
 	"github.com/qoke/toughdecisions/internal/hash"
 	"github.com/qoke/toughdecisions/internal/ids"
 	"github.com/qoke/toughdecisions/internal/pack"
@@ -180,10 +181,21 @@ func (r *Runner) seatsForPublish(cur *pack.Pack, row *store.Candidate) (map[pack
 		return nil, fmt.Errorf("harness: decode candidate %q config: %w", row.CandidateKey, err)
 	}
 	cfg.Seat = seat
+	if requiresStrictSchema(r.models, cfg.Model) {
+		return nil, fmt.Errorf("harness: candidate %q model %q does not support strict structured outputs: %w", row.CandidateKey, cfg.Model, gateway.ErrUnsupportedSetting)
+	}
 	if err := r.models.ValidateSettings(cfg); err != nil {
 		return nil, fmt.Errorf("harness: candidate %q: %w", row.CandidateKey, err)
 	}
 	seats[seat] = cfg
+	for s, c := range seats {
+		if requiresStrictSchema(r.models, c.Model) {
+			return nil, fmt.Errorf("harness: seat %q model %q does not support strict structured outputs: %w", string(s), c.Model, gateway.ErrUnsupportedSetting)
+		}
+		if err := r.models.ValidateSettings(c); err != nil {
+			return nil, fmt.Errorf("harness: seat %q: %w", string(s), err)
+		}
+	}
 	if len(seats) != len(pack.AllSeats) {
 		return nil, fmt.Errorf("harness: publish needs %d seats, got %d", len(pack.AllSeats), len(seats))
 	}
