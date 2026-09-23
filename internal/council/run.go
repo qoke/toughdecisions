@@ -319,6 +319,10 @@ func respIDOf(resp *store.Response) *string {
 func (r *Runner) callView(ctx context.Context, a executeArgs, seat pack.Seat) viewResult {
 	res := viewResult{seat: seat}
 	seatCfg := a.pack.Seats[seat]
+	if requiresStrictSchema(r.models, seatCfg.Model) {
+		res.failReason = "unsupported"
+		return res
+	}
 	if err := r.models.ValidateSettings(seatCfg); err != nil {
 		res.failReason = "unsupported"
 		return res
@@ -529,6 +533,11 @@ func (r *Runner) runJudgePhase(runCtx context.Context, a executeArgs, included m
 	noViews := len(views) == 0
 
 	seatCfg := a.pack.Seats[pack.SeatJudge]
+	if requiresStrictSchema(r.models, seatCfg.Model) {
+		<-viewsDone
+		r.finishJudge(a, startedAt, missing, noViews, nil, false, false)
+		return
+	}
 	if err := r.models.ValidateSettings(seatCfg); err != nil {
 		<-viewsDone
 		r.finishJudge(a, startedAt, missing, noViews, nil, false, false)
@@ -802,21 +811,32 @@ func (r *Runner) resolveDraft(agg *store.RequestAggregate, sourceRef string) (st
 	return "", fmt.Errorf("council: unknown source_ref %q", sourceRef)
 }
 
+// requiresStrictSchema reports whether the seat model lacks strict
+// json_schema support. A nil registry or unknown model fails closed.
+func requiresStrictSchema(mreg *models.Registry, model string) bool {
+	if mreg == nil {
+		return true
+	}
+	_, _, _, jsonSchema, _ := mreg.Supports(model)
+	return !jsonSchema
+}
+
 // responseFormatFor selects strict json_schema when the model supports it,
-// else json_object when supported, else nil. Rewrites return free text, so
-// only view/judge calls pass a schema.
+// else nil. There is intentionally no json_object fallback: an unenforced
+// view/judge shape is a degraded result, so callers fail closed before any
+// gateway call. Rewrites return free text, so only view/judge calls pass a
+// schema.
 func (r *Runner) responseFormatFor(model, schemaName, schemaJSON string) *gateway.ResponseFormat {
-	_, _, _, jsonSchema, jsonObject := r.models.Supports(model)
-	switch {
-	case jsonSchema:
-		return &gateway.ResponseFormat{
-			Type: "json_schema", SchemaName: schemaName,
-			Schema: json.RawMessage(schemaJSON), Strict: true,
-		}
-	case jsonObject:
-		return &gateway.ResponseFormat{Type: "json_object"}
-	default:
+	if r.models == nil {
 		return nil
+	}
+	_, _, _, jsonSchema, _ := r.models.Supports(model)
+	if !jsonSchema {
+		return nil
+	}
+	return &gateway.ResponseFormat{
+		Type: "json_schema", SchemaName: schemaName,
+		Schema: json.RawMessage(schemaJSON), Strict: true,
 	}
 }
 
