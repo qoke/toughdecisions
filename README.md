@@ -21,17 +21,20 @@ Hard rules (visible in code, not just docs):
 ## Bootstrap
 
 ```sh
+make build
 mkdir -p data                            # store directory must exist before migration
-council db migrate                        # create/migrate the SQLite store
-council pack init --file config/pack.yaml # load the initial production pack
-council serve                             # production is usable from here
+./bin/council db migrate                        # create/migrate the SQLite store
+./bin/council pack init --file config/pack.yaml # load the initial production pack
+./bin/council serve                             # production is usable from here
 # --- Phase 3+ (deferred) ---
 # author casepack/ and calibration.yaml
-council cases load
-council graders calibrate --all
-council pack publish --baselines-only     # Phase 5: fill baselines for the active pack
+./bin/council cases load
+./bin/council graders calibrate --all
+./bin/council pack publish --baselines-only     # Phase 5: fill baselines for the active pack
 # schedule: council harness weekly --notify
 ```
+
+Alternative without building: `go run ./cmd/council …` (a `go run` naming an individual `.go` file compiles only that file — the package is nine files).
 
 Exit codes: 0 ok, 1 error, 2 validation failure, 3 blocked
 (grader drift / checklist fail).
@@ -106,19 +109,20 @@ Full bootstrap (copy-paste; sentinel refuses until baselines exist, so the
 baselines step must come before the first weekly run):
 
 ```sh
+make build
 mkdir -p data                            # store directory must exist before migration
-council db migrate
-council pack init --file config/pack.yaml
-council serve                                    # production usable from here
+./bin/council db migrate
+./bin/council pack init --file config/pack.yaml
+./bin/council serve                                    # production usable from here
 # --- harness setup ---
 # author casepack/ and casepack/calibration.yaml, then:
-council cases validate
-council cases load
-council graders calibrate --all
-council graders status                           # both selection graders admitted
-council pack publish --baselines-only            # fill baselines for the active pack
-council harness sentinel                         # fails naming --baselines-only if skipped
-council harness weekly --notify                  # full run: sentinel,screen,compare,downstream,report
+./bin/council cases validate
+./bin/council cases load
+./bin/council graders calibrate --all
+./bin/council graders status                           # both selection graders admitted
+./bin/council pack publish --baselines-only            # fill baselines for the active pack
+./bin/council harness sentinel                         # fails naming --baselines-only if skipped
+./bin/council harness weekly --notify                  # full run: sentinel,screen,compare,downstream,report
 ```
 
 ## What is implemented vs deferred
