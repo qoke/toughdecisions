@@ -40,17 +40,55 @@ func TestViewFailsClosedWithoutStrictSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	// Subscribe immediately: recordView publishes payload{"seat","reason"}
+	// only after several serialized SQLite writes, so this subscription
+	// wins the race with the fail-closed event in practice.
+	ch, unsub := fx.reg.Subscribe(id)
+	defer unsub()
 	waitRequestState(t, fx.db, id, "complete_partial", 10*time.Second)
 	v := viewBySeat(t, fx.db, id, "perspective")
 	if v.State != "failed" {
 		t.Fatalf("perspective state = %q, want failed", v.State)
 	}
+	assertViewFailedReason(t, ch, "perspective", "unsupported")
 	if v.ResponseID != nil {
 		t.Fatal("fail-closed view must not store a response row")
 	}
 	for _, c := range fx.fake.Calls {
 		if c.Model == "v-persp" {
 			t.Fatalf("v-persp called the gateway %d times; want 0", fx.fake.CallCount()-before)
+		}
+	}
+}
+
+// assertViewFailedReason asserts the live view_failed event for seat carries
+// the expected fail-closed reason (recordView sets payload["reason"] from
+// the gate outcome, "unsupported" for a schema-less seat model). The caller
+// subscribes immediately after Run returns. The DB state assertions above
+// (failed, no response row, no gateway call) remain the primary fail-closed
+// proof; this pins the reason the product reports.
+func assertViewFailedReason(t *testing.T, ch <-chan Event, seat, want string) {
+	t.Helper()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				t.Fatal("event channel closed before view_failed")
+			}
+			if ev.Type != EventViewFailed {
+				continue
+			}
+			payload, _ := ev.Payload.(map[string]any)
+			if payload["seat"] != seat {
+				continue
+			}
+			if payload["reason"] != want {
+				t.Fatalf("view_failed reason = %v, want %q (payload %v)", payload["reason"], want, payload)
+			}
+			return
+		case <-timeout:
+			t.Fatalf("never observed view_failed for %q with reason %q", seat, want)
 		}
 	}
 }
