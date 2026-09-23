@@ -25,7 +25,7 @@ func TestLoadReturnsDefaults(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"server_listen", cfg.ServerListen(), ":8080"},
+		{"server_listen", cfg.ServerListen(), "127.0.0.1:8080"},
 		{"db_path", cfg.DBPath(), "./data/council.db"},
 		{"views_deadline", cfg.ViewsDeadline(), 30 * time.Second},
 		{"judge_deadline", cfg.JudgeDeadline(), 30 * time.Second},
@@ -52,6 +52,7 @@ func TestLoadEnvOverride(t *testing.T) {
 
 func TestRedactedOutputMasksSecret(t *testing.T) {
 	t.Setenv("COUNCIL_GATEWAY_API_KEY", "super-secret-value")
+	t.Setenv("COUNCIL_SERVER_TOKEN", "server-secret-value")
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -59,6 +60,9 @@ func TestRedactedOutputMasksSecret(t *testing.T) {
 	out := cfg.RedactedString()
 	if strings.Contains(out, "super-secret-value") {
 		t.Fatalf("redacted output leaks gateway_api_key")
+	}
+	if strings.Contains(out, "server-secret-value") {
+		t.Fatalf("redacted output leaks server_token")
 	}
 }
 

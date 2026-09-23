@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -56,9 +57,15 @@ func New(db *store.DB, runner *council.Runner, reg *council.Registry, cfg *confi
 	return &Server{db: db, runner: runner, reg: reg, cfg: cfg, log: log}
 }
 
-// Handler returns the mux with every API route.
+// sessionCookieName is the HttpOnly auth cookie set by POST /api/session.
+const sessionCookieName = "council_session"
+
+// Handler returns the mux with every API route. When a server token is
+// configured, every route except GET /healthz, GET /, and
+// POST /api/session requires the cookie or a bearer token.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/session", s.handleSession)
 	mux.HandleFunc("POST /api/threads", s.handleCreateThread)
 	mux.HandleFunc("GET /api/threads", s.handleListThreads)
 	mux.HandleFunc("PUT /api/threads/{id}/card", s.handlePutCard)
@@ -73,7 +80,86 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/summary", s.handleMetricsSummary)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /", s.handleIndex)
+	if token := serverToken(s.cfg); token != "" {
+		return s.requireAuth(mux, token)
+	}
 	return mux
+}
+
+// serverToken returns the trimmed server token (empty means auth disabled).
+func serverToken(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ServerToken())
+}
+
+// requireAuth wraps h, exempting only GET /healthz, GET /, and
+// POST /api/session. Anything else needs the session cookie or an
+// Authorization: Bearer token compared in constant time.
+func (s *Server) requireAuth(h http.Handler, token string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method == http.MethodGet && (r.URL.Path == "/healthz" || r.URL.Path == "/")) ||
+			(r.Method == http.MethodPost && r.URL.Path == "/api/session") {
+			h.ServeHTTP(w, r)
+			return
+		}
+		if !validToken(r, token) {
+			s.writeErr(w, r, http.StatusUnauthorized, "unauthorized", "authentication required")
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// validToken reports whether the request carries token via cookie or bearer.
+func validToken(r *http.Request, token string) bool {
+	if c, err := r.Cookie(sessionCookieName); err == nil && tokenEqual(c.Value, token) {
+		return true
+	}
+	const prefix = "Bearer "
+	if v := r.Header.Get("Authorization"); strings.HasPrefix(v, prefix) && tokenEqual(strings.TrimSpace(strings.TrimPrefix(v, prefix)), token) {
+		return true
+	}
+	return false
+}
+
+// tokenEqual compares tokens in constant time.
+func tokenEqual(got, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// handleSession validates the token from the JSON body and sets the
+// HttpOnly SameSite=Strict session cookie on success.
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	token := serverToken(s.cfg)
+	if token == "" {
+		s.writeErr(w, r, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if !s.decodeBody(w, r, &body) {
+		return
+	}
+	if !tokenEqual(strings.TrimSpace(body.Token), token) {
+		s.writeErr(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
+		return
+	}
+	//nolint:gosec // Secure would break plain-HTTP loopback binds (the default);
+	// the cookie is HttpOnly + SameSite=Strict and only sent same-origin.
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) writeErr(w http.ResponseWriter, r *http.Request, status int, code, msg string) {

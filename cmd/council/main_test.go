@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/qoke/toughdecisions/internal/config"
@@ -223,6 +224,74 @@ func TestServeHTTPBindError(t *testing.T) {
 	// Missing pack dir is fine; bind to privileged port 1 fails.
 	if err := serveHTTP(cfg, log); err == nil {
 		t.Fatal("serveHTTP privileged port: want error")
+	}
+}
+
+func TestServeHTTPRefusesNonLoopbackWithoutToken(t *testing.T) {
+	cases := []struct {
+		name   string
+		listen string
+		token  string
+		wantOK bool
+	}{
+		{"empty host is non-loopback", ":8080", "", false},
+		{"unspecified v4 is non-loopback", "0.0.0.0:8080", "", false},
+		{"unspecified v6 is non-loopback", "[::]:8080", "", false},
+		{"whitespace token counts as unset", "0.0.0.0:8080", "   ", false},
+		{"token allows non-loopback check to pass", "0.0.0.0:1", "tok", true},
+		{"loopback v4 no token ok", "127.0.0.1:1", "", true},
+		{"localhost resolves loopback", "localhost:1", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("COUNCIL_SERVER_LISTEN", tc.listen)
+			t.Setenv("COUNCIL_SERVER_TOKEN", tc.token)
+			t.Setenv("COUNCIL_DB_PATH", t.TempDir()+"/c.db")
+			t.Setenv("COUNCIL_MODELS_FILE", writeModelsFile(t))
+			cfg, err := loadTestConfig()
+			if err != nil {
+				t.Fatalf("config: %v", err)
+			}
+			log := newTestLog(cfg)
+			// Port 1 fails at bind (permission) so any error there means the
+			// token gate passed; only the refusal error means it did not.
+			err = serveHTTP(cfg, log)
+			if err == nil {
+				t.Fatal("serveHTTP: want error (bind to port 1 must fail)")
+			}
+			refused := strings.Contains(err.Error(), "server_token")
+			if !tc.wantOK && !refused {
+				t.Fatalf("serveHTTP %q token %q: want token refusal, got %v", tc.listen, tc.token, err)
+			}
+			if tc.wantOK && refused {
+				t.Fatalf("serveHTTP %q token %q: unexpected token refusal: %v", tc.listen, tc.token, err)
+			}
+		})
+	}
+}
+
+func TestIsLoopbackListen(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{"127.0.0.1:8080", true},
+		{"127.0.0.2:8080", true},
+		{"[::1]:8080", true},
+		{"localhost:8080", true},
+		{":8080", false},
+		{"0.0.0.0:8080", false},
+		{"[::]:8080", false},
+		{"bogus", false},
+		{"", false},
+		{"nonexistent.invalid:8080", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.addr, func(t *testing.T) {
+			if got := isLoopbackListen(tc.addr); got != tc.want {
+				t.Fatalf("isLoopbackListen(%q) = %v, want %v", tc.addr, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -42,6 +42,16 @@ pre#timings{background:#f4f4f4;padding:.5rem;border-radius:6px;white-space:pre-w
 <div id="danger-banner" role="alert"></div>
 <div id="status" aria-live="polite"></div>
 
+<section aria-label="Session" id="session-section" hidden>
+<h2>Sign in</h2>
+<div class="row">
+<input type="password" id="session-token" placeholder="Server token" autocomplete="off" style="max-width:280px">
+<button id="session-submit" class="primary">Sign in</button>
+<span id="session-status" class="muted"></span>
+</div>
+<p class="muted">The token is sent once via POST /api/session to obtain an HttpOnly cookie; later requests use the cookie.</p>
+</section>
+
 <section aria-label="Threads and card">
 <h2>Thread &amp; case card</h2>
 <div class="row">
@@ -158,7 +168,9 @@ hideDanger();
 function api(path,opts){
   opts=opts||{};
   opts.headers=Object.assign({"Content-Type":"application/json"},opts.headers||{});
+  opts.credentials="same-origin";
   return fetch(path,opts).then(function(r){
+    if(r.status===401&&path!=="/api/session"){showSessionPrompt();throw new Error("401 unauthorized: sign in");}
     if(!r.ok)return r.text().then(function(t){throw new Error(r.status+" "+t);});
     var ct=r.headers.get("content-type")||"";
     if(r.status===201||r.status===204&&!ct)return {};
@@ -341,8 +353,9 @@ function handleEvent(ev){
 function openRequest(id){
   state.requestId=id;
   $("open-request").textContent=id;
-  var u=new URL(location.href);u.searchParams.set("request",id);$("deeplink").href=u.toString();
-  history.replaceState(null,"","?request="+encodeURIComponent(id));
+  var deeplinkSuffix="?request="+encodeURIComponent(id);
+  $("deeplink").href=deeplinkSuffix;
+  history.replaceState(null,"",deeplinkSuffix);
   resetViews();
   api("/api/requests/"+encodeURIComponent(id)).then(applySnapshot).catch(function(e){setStatus("load request failed: "+e.message);});
   if(state.es)state.es.close();
@@ -354,6 +367,20 @@ function openRequest(id){
   es.onmessage=handleEvent;
   es.onerror=function(){setStatus("SSE reconnecting…");};
 }
+
+// session: obtain the HttpOnly cookie via POST /api/session.
+function showSessionPrompt(){$("session-section").hidden=false;}
+function hideSessionPrompt(){$("session-section").hidden=true;$("session-token").value="";}
+$("session-submit").addEventListener("click",function(){
+  var tok=$("session-token").value;
+  fetch("/api/session",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:tok})})
+    .then(function(r){
+      if(!r.ok)throw new Error("invalid token ("+r.status+")");
+      hideSessionPrompt();$("session-status").textContent="signed in";
+      loadThreads(state.threadId);
+    })
+    .catch(function(e){$("session-status").textContent="sign in failed: "+e.message;});
+});
 
 // rewrite
 document.querySelectorAll("[data-rewrite]").forEach(function(b){

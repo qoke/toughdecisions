@@ -10,7 +10,8 @@ import (
 // Config is the council configuration. Each field is a cfggo accessor.
 type Config struct {
 	cfggo.Structure
-	ServerListen              func() string        `cfggo:"server_listen" default:":8080" help:"HTTP listen address"`
+	ServerListen              func() string        `cfggo:"server_listen" default:"127.0.0.1:8080" help:"HTTP listen address"`
+	ServerToken               func() string        `cfggo:"server_token" default:"" secret:"true" help:"Required bearer token for non-loopback binds; enables cookie/bearer auth"`
 	DBPath                    func() string        `cfggo:"db_path" default:"./data/council.db" help:"SQLite database path"`
 	GatewayBaseURL            func() string        `cfggo:"gateway_base_url" default:"http://localhost:4000" help:"LiteLLM base URL"`
 	GatewayAPIKey             func() string        `cfggo:"gateway_api_key" default:"" secret:"true" help:"LiteLLM API key"`

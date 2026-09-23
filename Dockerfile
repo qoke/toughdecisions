@@ -20,8 +20,13 @@
 #   docker run --rm -v "$PWD/data:/data" -v "$PWD/config:/config:ro" \
 #     council:local pack init --file /config/pack.yaml
 #
-# Secrets (COUNCIL_GATEWAY_API_KEY) are injected at runtime via -e/--env-file and
-# are never baked into the image.
+# Serve binds loopback-only by default (server_listen=127.0.0.1:8080). The
+# container overrides the bind to 0.0.0.0:8080 because loopback inside the
+# container is unreachable from the host; a non-loopback bind requires the
+# server_token, so inject COUNCIL_SERVER_TOKEN at runtime via -e/--env-file.
+#
+# Secrets (COUNCIL_GATEWAY_API_KEY, COUNCIL_SERVER_TOKEN) are injected at
+# runtime via -e/--env-file and are never baked into the image.
 
 FROM golang:1.25 AS build
 
@@ -53,7 +58,8 @@ COPY --from=build --chown=65532:65532 /data /data
 VOLUME ["/data"]
 
 ENV COUNCIL_DB_PATH=/data/council.db \
-    COUNCIL_REPORTS_DIR=/data/reports
+    COUNCIL_REPORTS_DIR=/data/reports \
+    COUNCIL_SERVER_LISTEN=0.0.0.0:8080
 
 USER nonroot:nonroot
 
