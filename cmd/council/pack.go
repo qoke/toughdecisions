@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/qoke/toughdecisions/internal/gateway"
 	"github.com/qoke/toughdecisions/internal/harness"
 	"github.com/qoke/toughdecisions/internal/logx"
 	"github.com/qoke/toughdecisions/internal/models"
@@ -36,7 +37,15 @@ func packInit(args []string) int {
 		fmt.Fprintf(os.Stderr, "pack init: %v\n", err)
 		return exitError
 	}
-	p, err := pack.InitValidated(db, *file, mreg.ValidateSettings)
+	p, err := pack.InitValidated(db, *file, func(sc pack.SeatConfig) error {
+		if err := mreg.ValidateSettings(sc); err != nil {
+			return err
+		}
+		if _, _, _, jsonSchema, _ := mreg.Supports(sc.Model); !jsonSchema {
+			return fmt.Errorf("models: model %q does not support strict structured outputs: %w", sc.Model, gateway.ErrUnsupportedSetting)
+		}
+		return nil
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pack init: %v\n", err)
 		return exitValidation

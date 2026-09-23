@@ -49,6 +49,55 @@ func TestPackInitInvalidModelWritesNoRow(t *testing.T) {
 	}
 }
 
+// TestPackInitSchemaLessModelWritesNoRow is the R-02a CLI test: a pack init
+// whose seat model lacks strict json_schema exits 2 with no pack row.
+func TestPackInitSchemaLessModelWritesNoRow(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("COUNCIL_DB_PATH", dir+"/c.db")
+	modelsPath := t.TempDir() + "/models-noschema.yaml"
+	content := "models:\n" +
+		"  - id: m1\n    family: openai\n    expected_response_model_prefixes: [\"m1\"]\n" +
+		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: true, json_object: true}\n" +
+		"  - id: mplain\n    family: openai\n    expected_response_model_prefixes: [\"mplain\"]\n" +
+		"    supports: {temperature: true, top_p: true, reasoning_effort: true, json_schema: false, json_object: true}\n"
+	if err := os.WriteFile(modelsPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COUNCIL_MODELS_FILE", modelsPath)
+	t.Setenv("COUNCIL_PACK_FILE", writePackFile(t))
+	if got := run([]string{"db", "migrate"}); got != exitOK {
+		t.Fatalf("migrate = %d", got)
+	}
+	other := t.TempDir() + "/noschema-pack.yaml"
+	seats := "seats:\n" +
+		"  possibility: {model: mplain, family: openai}\n" +
+		"  perspective: {model: m1, family: openai}\n" +
+		"  stress_tester: {model: m1, family: openai}\n" +
+		"  judge: {model: m1, family: openai}\n"
+	if err := os.WriteFile(other, []byte(seats), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := packInit([]string{"--file", other}); got != exitValidation {
+		t.Fatalf("init schema-less model = %d, want %d", got, exitValidation)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(cfg.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.PacksByStatus("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("active packs = %d; want 0 (rejected init must write no row)", len(rows))
+	}
+}
+
 // TestPackInitValidStillSucceeds guards the other half: a valid init still
 // exits 0 and leaves exactly one active pack.
 func TestPackInitValidStillSucceeds(t *testing.T) {
