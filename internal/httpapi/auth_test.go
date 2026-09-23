@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"bufio"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSessionAuthBoundary verifies the exact auth boundary: healthz, the UI
@@ -58,6 +60,114 @@ func TestSessionAuthBoundary(t *testing.T) {
 	w = serveOne(h, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("bearer correct token = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// POST /healthz is NOT exempt: only GET /healthz is open, so a POST
+	// without credentials still requires auth.
+	w = doReq(t, h, "POST", "/healthz", "")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /healthz without auth = %d, want 401", w.Code)
+	}
+}
+
+// TestSessionAuthEventSourceAndHealthzPost covers the remaining AC wording:
+// an authenticated EventSource-style request (the SSE route with the session
+// cookie) reaches the handler, and POST /healthz is not exempt from auth.
+func TestSessionAuthEventSourceAndHealthzPost(t *testing.T) {
+	t.Setenv("COUNCIL_SERVER_TOKEN", "test-token-123")
+	ts := setupTestServer(t, fastScripts())
+	h := ts.srv.Handler()
+
+	// Unauthenticated SSE route requires auth.
+	id := runCompletedRequest(t, ts)
+	w := doReq(t, h, "GET", "/api/requests/"+id+"/events", "")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("GET events without auth = %d, want 401", w.Code)
+	}
+
+	// Establish the session cookie.
+	w = doReq(t, h, "POST", "/api/session", `{"token":"test-token-123"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var sessionCookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			sessionCookie = c
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatalf("no %q cookie set", sessionCookieName)
+	}
+
+	// Authenticated EventSource-style request reaches the SSE handler and
+	// gets the snapshot frame first.
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	req, err := http.NewRequest("GET", srv.URL+"/api/requests/"+id+"/events", nil)
+	if err != nil {
+		t.Fatalf("new SSE request: %v", err)
+	}
+	req.AddCookie(sessionCookie)
+	client := srv.Client()
+	client.Timeout = 15 * time.Second
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated SSE request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated SSE status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("SSE content-type = %q, want text/event-stream", ct)
+	}
+	if got := readFirstSSEEvent(t, resp); got != "snapshot" {
+		t.Fatalf("first SSE event = %q, want snapshot", got)
+	}
+
+	// POST /healthz with the session cookie passes the middleware (no 401):
+	// the exemption is GET-only, so the mux answers the route decision.
+	req = httptestRequest(t, "POST", "/healthz", "")
+	req.AddCookie(sessionCookie)
+	w = serveOne(h, req)
+	if w.Code == http.StatusUnauthorized {
+		t.Fatalf("POST /healthz with cookie = 401, want the route decision, not auth")
+	}
+}
+
+// readFirstSSEEvent reads SSE frames until the first event name arrives.
+func readFirstSSEEvent(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	type result struct {
+		event string
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+		var ev string
+		for sc.Scan() {
+			line := sc.Text()
+			if strings.HasPrefix(line, "event:") {
+				ev = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			} else if line == "" && ev != "" {
+				ch <- result{event: ev}
+				return
+			}
+		}
+		ch <- result{err: sc.Err()}
+	}()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			t.Fatalf("read SSE frame: %v", r.err)
+		}
+		return r.event
+	case <-time.After(10 * time.Second):
+		t.Fatal("no SSE frame within 10s")
+		return ""
 	}
 }
 
