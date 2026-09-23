@@ -61,7 +61,7 @@ Config loads from `COUNCIL_`-prefixed env vars with these defaults:
 
 | Key | Default |
 |---|---|
-| `server_listen` | `:8080` |
+| `server_listen` | `:8080` (all interfaces; use `127.0.0.1:8080` for loopback-only) |
 | `db_path` | `./data/council.db` |
 | `gateway_base_url` | `http://localhost:4000` |
 | `pack_file` | `./config/pack.yaml` |
@@ -75,6 +75,12 @@ Config loads from `COUNCIL_`-prefixed env vars with these defaults:
 `http://localhost:4000` is the local equivalent). The client appends
 `/v1/chat/completions`, so a base ending in `/v1` or `/` is normalised away
 but is not canonical.
+
+`council serve` is local-only by design: the HTTP API, SSE stream and UI have
+no inbound authentication, and `server_listen` defaults to `:8080`, so the
+service is reachable by anything that can route to the host. Do not expose it
+to an untrusted network; set `server_listen` to `127.0.0.1:8080` for
+loopback-only binding.
 
 Repo config: `config/pack.yaml` (4 seats: possibility, perspective,
 stress_tester, judge; views 2000 tokens, judge 3000), `config/models.yaml`

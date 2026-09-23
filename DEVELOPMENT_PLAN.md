@@ -89,7 +89,7 @@ Define `Config` with cfggo. Canonical keys (snake_case; cfggo maps env/flags per
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `server_listen` | string | `:8080` | |
+| `server_listen` | string | `:8080` | all interfaces; use `127.0.0.1:8080` for loopback-only |
 | `db_path` | string | `./data/council.db` | |
 | `gateway_base_url` | string | `http://localhost:4000` | LiteLLM |
 | `gateway_api_key` | string (secret) | `""` | |
@@ -340,6 +340,12 @@ Events (`internal/council/registry.go`): `type Event struct{ Type string; Reques
 | `GET /` | embedded UI |
 
 Validation: reject empty messages+question; max body 256 KB ⚙. Errors as `{error, code}` JSON.
+
+`council serve` is local-only by design: the HTTP API, SSE stream and UI have
+no inbound authentication, and `server_listen` defaults to `:8080`, so the
+service is reachable by anything that can route to the host. Do not expose it
+to an untrusted network; set `server_listen` to `127.0.0.1:8080` for
+loopback-only binding.
 
 **UI (`ui/index.html`, vanilla JS, EventSource):** thread picker + card editor (7 textareas, "save card"); messages textarea + question + style; "Ask council" (sends `supersedes_request_id` of the currently open request if any). Three role cards, each badge **"Independent view — not yet synthesized"**, spinner until `view_complete`; render qualification **above** the draft; copy button enabled only on complete; `view_failed` shows "missing: <role>"; `view_late` shows "arrived after synthesis — not included". Red banner on `danger`. Judge card with sections; `judge_failed` shows "Judge did not complete; views remain available." Rewrite buttons (shorter / warmer / more direct / custom) on the selected draft; "Mark as sent" (prefilled textarea) ; feedback tag buttons. On page load with `?request=<id>` fetch state then subscribe.
 
