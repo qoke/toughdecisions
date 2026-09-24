@@ -59,8 +59,12 @@ binary itself — do not trust a hand-copied table:
 make build
 ./bin/council config reference   # every key, its env name, default
 ./bin/council config diagnose    # effective values plus where each came from (env vs default)
-./bin/council config show        # effective values (secrets masked as ****)
+./bin/council config show        # effective values (fields marked secret masked as ****)
 ```
+
+The renders mask only fields marked `secret`; `gateway_base_url` and
+`notify_webhook_url` are not secret-tagged, so they print in full — do
+not embed tokens in them.
 
 Key settings: `COUNCIL_GATEWAY_BASE_URL` (LiteLLM proxy root, without
 `/v1`; the client appends `/v1/chat/completions`),

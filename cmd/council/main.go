@@ -169,7 +169,7 @@ func serve(args []string) int {
 	}
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
+		fmt.Fprintf(os.Stderr, "serve: %s\n", loadErrMessage(err))
 		return exitError
 	}
 	if err := requireGatewayKey(cfg); err != nil {

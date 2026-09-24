@@ -14,7 +14,11 @@ import (
 	"github.com/qoke/toughdecisions/internal/models"
 )
 
-func newHTTPClient() *http.Client { return &http.Client{} }
+func newHTTPClient() *http.Client {
+	return &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+}
 
 // harnessWeekly runs plan 12.9 weekly orchestration.
 func harnessWeekly(args []string) int {

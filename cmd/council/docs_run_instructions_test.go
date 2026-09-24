@@ -19,9 +19,10 @@ import (
 // that actually invoke `db migrate` — that `mkdir -p data` precedes it. It
 // also asserts that no discovered doc/build file documents the forbidden
 // single-file `go run` form, and that no discovered doc/build file leaks
-// secrets (dummy-key literals, sk-shaped keys, credential-bearing URLs, or
-// the private local endpoint as copy-pasteable config). Doc/build files
-// are discovered by walking (repo-root *.md, Makefile, Dockerfile,
+// known secret shapes (key prefixes, JWT/PEM, credential URLs/params, or
+// the private local endpoint as copy-pasteable config; line-split secrets,
+// base64 blobs, and surfaces outside the walk are NOT covered). Doc/build
+// files are discovered by walking (repo-root *.md, Makefile, Dockerfile,
 // .github/workflows/*), never by a hardcoded name list. Every failure
 // names file:line.
 func TestDocsRunInstructionsAreExecutable(t *testing.T) {
@@ -44,15 +45,27 @@ func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 		})
 	}
 
-	// (d) No discovered doc/build surface may leak secrets: the local
-	// dummy-key literal, an sk-shaped key, a credential-bearing URL, or
-	// the private local endpoint presented as copy-pasteable config.
+	// (d) No discovered doc/build surface may leak secrets: known key
+	// prefixes (local dummy literal, sk-shaped, AWS/Slack/Google API keys),
+	// JWT and PEM private-key shapes, credential-bearing URLs (with or
+	// without a password in userinfo), credential query params
+	// (case-insensitive, incl. apiKey/access_token/X-Amz-Signature), or the
+	// private local endpoint presented as copy-pasteable config.
 	// Every failure names file:line.
+	// Residual gaps this guard knowingly does NOT cover: secrets split
+	// across lines, base64-encoded or otherwise obfuscated blobs, and
+	// surfaces outside the walk (docs/**, scripts, *.yaml, testdata).
 	secretRe := []*regexp.Regexp{
 		regexp.MustCompile(`local_dummy_key`),
 		regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),
+		regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
+		regexp.MustCompile(`ghp_[A-Za-z0-9]{20,}`),
+		regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`),
+		regexp.MustCompile(`AIza[0-9A-Za-z_-]{30,}`),
+		regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.`),
+		regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
 		regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>/]+@`), // passwordless userinfo too (https://KEY@host); <...> placeholders excluded
-		regexp.MustCompile(`[?&(](api_key|apikey|apiKey|access_token|token|key|secret|password)=`),
+		regexp.MustCompile(`(?i)[?&(](api_key|apikey|apiKey|access_token|token|key|secret|password|x-amz-signature)=`),
 		regexp.MustCompile(`127\.0\.0\.1:4000`),
 	}
 	for _, name := range docsDocBuildFiles(t, root) {

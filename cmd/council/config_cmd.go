@@ -28,7 +28,7 @@ func configCmd(args []string) int {
 	}
 	switch args[0] {
 	case "show", "reference", "diagnose":
-		return configRender(args[0])
+		return configRender(args[0], args[1:])
 	case "check":
 		return configCheck(args[1:])
 	default:
@@ -37,13 +37,50 @@ func configCmd(args []string) int {
 	}
 }
 
+// redactLoadError redacts the configured secret values
+// (COUNCIL_GATEWAY_API_KEY, COUNCIL_SERVER_TOKEN) from a config.Load()
+// error string before it is printed. Pinned cfggo v1.0.34 quotes raw env
+// input for non-secret TYPED keys, so a secret pasted into e.g.
+// COUNCIL_GATEWAY_MAX_CONCURRENT would otherwise be echoed verbatim. The
+// rest of the message is kept so users still learn which setting is
+// invalid (e.g. `cannot parse int "***"`).
+func redactLoadError(msg string) string {
+	for _, env := range []string{"COUNCIL_GATEWAY_API_KEY", "COUNCIL_SERVER_TOKEN"} {
+		if v, ok := lookupSecretEnv(env); ok {
+			msg = strings.ReplaceAll(msg, v, "***")
+		}
+	}
+	return msg
+}
+
+// lookupSecretEnv returns the raw env value for a secret-tagged var when it
+// is set and non-blank. Blank values cannot appear in an error string, so
+// there is nothing to redact.
+func lookupSecretEnv(name string) (string, bool) {
+	v, ok := os.LookupEnv(name)
+	if !ok || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
+// loadErrMessage renders a config.Load() error for stderr with secret values
+// redacted (see redactLoadError).
+func loadErrMessage(err error) string {
+	return redactLoadError(err.Error())
+}
+
 // configRender prints cfg.String / ConfigReference / Diagnose output. All
 // three mask secret:"true" fields via cfggo; nothing here re-implements
 // masking, and nothing opens the store or builds a gateway client.
-func configRender(sub string) int {
+func configRender(sub string, args []string) int {
+	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "config %s: unexpected args; usage: config %s\n", sub, sub)
+		return exitValidation
+	}
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config %s: %v\n", sub, err)
+		fmt.Fprintf(os.Stderr, "config %s: %s\n", sub, loadErrMessage(err))
 		return exitError
 	}
 	switch sub {
@@ -72,9 +109,13 @@ func configCheck(args []string) int {
 		fmt.Fprintf(os.Stderr, "config check: nothing to check without --live\n")
 		return exitValidation
 	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "config check: unexpected args; usage: config check --live\n")
+		return exitValidation
+	}
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config check: %v\n", err)
+		fmt.Fprintf(os.Stderr, "config check: %s\n", loadErrMessage(err))
 		return exitError
 	}
 	if err := requireGatewayKey(cfg); err != nil {
@@ -106,7 +147,10 @@ func configCheck(args []string) int {
 	return exitOK
 }
 
-// firstRegistryModel returns the first model id in ModelsFile order.
+// firstRegistryModel returns the first model id in ModelsFile order,
+// mirroring production's models.LoadRegistry semantics: malformed YAML or
+// an entry with an empty id is an error; unknown extra fields are ignored
+// (non-strict). It never echoes a file snippet, only the path.
 func firstRegistryModel(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -116,7 +160,7 @@ func firstRegistryModel(path string) (string, error) {
 		Models []models.Capability `yaml:"models"`
 	}
 	if err := yaml.Unmarshal(raw, &f); err != nil {
-		return "", fmt.Errorf("parse models %s: %w", path, err)
+		return "", fmt.Errorf("parse models %s", path)
 	}
 	if len(f.Models) == 0 {
 		return "", fmt.Errorf("no models in %s", path)
