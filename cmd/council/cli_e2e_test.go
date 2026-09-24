@@ -25,6 +25,9 @@ func testEnv(t *testing.T) (dir string) {
 	t.Setenv("COUNCIL_CANDIDATES_FILE", filepath.Join(dir, "candidates.yaml"))
 	t.Setenv("COUNCIL_REPORTS_DIR", filepath.Join(dir, "reports"))
 	t.Setenv("COUNCIL_LOG_LEVEL", "error")
+	// Dummy key for spending commands: the suite injects gateway.Fake, so
+	// no network is touched; the gate just needs a non-blank key.
+	t.Setenv("COUNCIL_GATEWAY_API_KEY", "sk-test-dummy-key-001")
 	return dir
 }
 

@@ -26,7 +26,7 @@ import (
 var gatewayFactory = defaultGateway
 
 func defaultGateway(cfg *config.Config, log logx.Logger) gateway.Client {
-	return gateway.New(newHTTPClient(), cfg.GatewayBaseURL(), cfg.GatewayAPIKey(), cfg.GatewayMaxConcurrent(), log)
+	return gateway.New(newHTTPClient(), cfg.GatewayBaseURL(), normalizeGatewayKey(cfg.GatewayAPIKey()), cfg.GatewayMaxConcurrent(), log)
 }
 
 type gradersFile struct {
@@ -172,6 +172,10 @@ func gradersCalibrate(args []string) int {
 		return exitError
 	}
 	defer db.Close()
+	if err := requireGatewayKey(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "graders calibrate: %v\n", err)
+		return exitError
+	}
 	path := *file
 	if path == "" {
 		path = cfg.GradersFile()

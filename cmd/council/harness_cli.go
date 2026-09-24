@@ -30,6 +30,17 @@ func harnessWeekly(args []string) int {
 		fmt.Fprintf(os.Stderr, "harness weekly: %v\n", err)
 		return exitValidation
 	}
+	if parsed.Sentinel || parsed.Screen || parsed.Compare || parsed.Downstream {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "harness weekly: %v\n", err)
+			return exitError
+		}
+		if err := requireGatewayKey(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "harness weekly: %v\n", err)
+			return exitError
+		}
+	}
 	r, _, closeDB, err := openHarnessRunner()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harness weekly: %v\n", err)
@@ -110,6 +121,13 @@ func harnessSentinel(args []string) int {
 		fmt.Fprintf(os.Stderr, "harness sentinel: unexpected args; usage: harness sentinel\n")
 		return exitValidation
 	}
+	if cfg, err := config.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "harness sentinel: %v\n", err)
+		return exitError
+	} else if err := requireGatewayKey(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "harness sentinel: %v\n", err)
+		return exitError
+	}
 	r, _, closeDB, err := openHarnessRunner()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harness sentinel: %v\n", err)
@@ -141,6 +159,13 @@ func harnessScreen(args []string) int {
 	if fs.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "harness screen: unexpected args; usage: harness screen [--fresh]\n")
 		return exitValidation
+	}
+	if keyCfg, err := config.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "harness screen: %v\n", err)
+		return exitError
+	} else if err := requireGatewayKey(keyCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "harness screen: %v\n", err)
+		return exitError
 	}
 	r, cfg, closeDB, err := openHarnessRunner()
 	if err != nil {
@@ -183,6 +208,13 @@ func harnessCompare(args []string) int {
 	if *candidate == "" {
 		fmt.Fprintf(os.Stderr, "harness compare: --candidate <key> is required\n")
 		return exitValidation
+	}
+	if keyCfg, err := config.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "harness compare: %v\n", err)
+		return exitError
+	} else if err := requireGatewayKey(keyCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "harness compare: %v\n", err)
+		return exitError
 	}
 	r, cfg, closeDB, err := openHarnessRunner()
 	if err != nil {
@@ -237,6 +269,13 @@ func harnessDownstream(args []string) int {
 	if *candidate == "" || *runID == "" {
 		fmt.Fprintf(os.Stderr, "harness downstream: --candidate <key> and --run <id> are required\n")
 		return exitValidation
+	}
+	if keyCfg, err := config.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "harness downstream: %v\n", err)
+		return exitError
+	} else if err := requireGatewayKey(keyCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "harness downstream: %v\n", err)
+		return exitError
 	}
 	r, cfg, closeDB, err := openHarnessRunner()
 	if err != nil {

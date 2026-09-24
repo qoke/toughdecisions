@@ -103,6 +103,10 @@ func packPublish(args []string) int {
 		return exitError
 	}
 	defer db.Close()
+	if err := requireGatewayKey(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "pack publish: %v\n", err)
+		return exitError
+	}
 	mreg, err := models.LoadRegistry(cfg.ModelsFile())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pack publish: %v\n", err)

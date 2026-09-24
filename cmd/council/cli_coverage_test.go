@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,27 +45,47 @@ func TestCLIFailsWhenStoreCannotOpen(t *testing.T) {
 	t.Setenv("COUNCIL_DB_PATH", t.TempDir()) // a directory is not a database file
 
 	cases := []struct {
-		name string
-		fn   func() int
-		want int
+		name    string
+		fn      func() int
+		want    int
+		wantErr string
 	}{
-		{name: "should fail when cases validate cannot open the store", fn: func() int { return casesValidate(nil) }, want: exitError},
-		{name: "should fail when cases load cannot open the store", fn: func() int { return casesLoad(nil) }, want: exitError},
-		{name: "should fail when db prune cannot open the store", fn: func() int { return dbPrune(nil) }, want: exitError},
-		{name: "should fail when graders calibrate cannot open the store", fn: func() int { return gradersCalibrate(nil) }, want: exitError},
-		{name: "should fail when graders status cannot open the store", fn: func() int { return gradersStatus(nil) }, want: exitError},
-		{name: "should fail when flags list cannot open the store", fn: func() int { return flagsList(nil) }, want: exitError},
-		{name: "should fail when pack publish cannot open the store", fn: func() int { return packPublish(nil) }, want: exitError},
-		{name: "should fail when harness compare cannot open the store", fn: func() int { return harnessCompare([]string{"--candidate", "x"}) }, want: exitError},
+		{name: "should fail when cases validate cannot open the store", fn: func() int { return casesValidate(nil) }, want: exitError, wantErr: "cases validate"},
+		{name: "should fail when cases load cannot open the store", fn: func() int { return casesLoad(nil) }, want: exitError, wantErr: "cases load"},
+		{name: "should fail when db prune cannot open the store", fn: func() int { return dbPrune(nil) }, want: exitError, wantErr: "db prune"},
+		{name: "should fail when graders calibrate cannot open the store", fn: func() int { return gradersCalibrate(nil) }, want: exitError, wantErr: "graders calibrate"},
+		{name: "should fail when graders status cannot open the store", fn: func() int { return gradersStatus(nil) }, want: exitError, wantErr: "graders status"},
+		{name: "should fail when flags list cannot open the store", fn: func() int { return flagsList(nil) }, want: exitError, wantErr: "flags list"},
+		{name: "should fail when pack publish cannot open the store", fn: func() int { return packPublish(nil) }, want: exitError, wantErr: "pack publish"},
+		{name: "should fail when harness compare cannot open the store", fn: func() int { return harnessCompare([]string{"--candidate", "x"}) }, want: exitError, wantErr: "harness compare"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
+			oldErr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+			done := make(chan string, 1)
+			go func() {
+				raw, _ := io.ReadAll(r)
+				done <- string(raw)
+			}()
 			got := tc.fn()
+			_ = w.Close()
+			os.Stderr = oldErr
+			msg := <-done
 
 			// Assert
 			if got != tc.want {
 				t.Fatalf("exit = %d, want %d", got, tc.want)
+			}
+			if !strings.Contains(msg, tc.wantErr) {
+				t.Fatalf("stderr = %q, want it to name %q (the store-open branch)", msg, tc.wantErr)
+			}
+			// The key gate passes here (testEnv sets a dummy key), so a
+			// store failure must never read as a missing-key failure.
+			if strings.Contains(msg, "COUNCIL_GATEWAY_API_KEY") {
+				t.Fatalf("stderr = %q, must be the store-open branch, not the key gate", msg)
 			}
 		})
 	}

@@ -34,6 +34,8 @@ func TestShippedExampleBootstrapOffline(t *testing.T) {
 	reports := filepath.Join(dir, "reports")
 	t.Setenv("COUNCIL_REPORTS_DIR", reports)
 	t.Setenv("COUNCIL_LOG_LEVEL", "error")
+	// Dummy key: the test injects gateway.Fake, so no network is touched.
+	t.Setenv("COUNCIL_GATEWAY_API_KEY", "sk-test-dummy-key-001")
 	// Keep the weekly run small and deterministic: 2 sentinel cases.
 	t.Setenv("COUNCIL_HARNESS_SENTINEL_COUNT", "2")
 	t.Setenv("COUNCIL_HARNESS_SCREEN_CASES", "2")
