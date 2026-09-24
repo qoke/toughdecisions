@@ -123,10 +123,10 @@ make build
 
 Spend per command lives in the [token-spend table](#token-spend)
 below — the in-code table is the only source, so it is not restated
-here. Framing worth knowing: `council serve` spends 4 model calls per
-request (3 views + 1 judge) with no cache reuse, plus 1 per rewrite;
-`council harness weekly --steps report` is the only harness subcommand
-that spends nothing. The spending commands are `council serve`,
+here. Framing worth knowing: `council serve` makes no cache reuse of
+model calls across requests; `council harness weekly --steps report`
+is the only `--steps` selection of `harness weekly` that spends
+nothing. The spending commands are `council serve`,
 `council harness sentinel`, `council harness screen`,
 `council harness compare`, `council harness downstream`,
 `council harness weekly`, `council graders calibrate`,
