@@ -51,8 +51,8 @@ func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 	secretRe := []*regexp.Regexp{
 		regexp.MustCompile(`local_dummy_key`),
 		regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),
-		regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]*:[^\s"'<>]*@`),
-		regexp.MustCompile(`[?&(](api_key|apikey|token|key|secret|password)=`),
+		regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>/]+@`), // passwordless userinfo too (https://KEY@host); <...> placeholders excluded
+		regexp.MustCompile(`[?&(](api_key|apikey|apiKey|access_token|token|key|secret|password)=`),
 		regexp.MustCompile(`127\.0\.0\.1:4000`),
 	}
 	for _, name := range docsDocBuildFiles(t, root) {

@@ -121,22 +121,17 @@ make build
 # unknown subcommand "bogus" (want one of: serve db pack cases graders harness flags config feedback help; run `council help` for help)
 ```
 
-Spend per command (rough counts; exact wording lives in the table
-below): `council serve` spends 4 model calls per request (3 views +
-1 judge), 1 per rewrite; `council harness sentinel` spends
-4 seats × `harness_sentinel_count` generations plus drift rechecks and
-2 pairwise calls (default 16 generations); `council harness screen`
-spends per candidate `harness_screen_cases` × 2 generations + 2 grades
-(default 6 cases); `council harness compare` spends per candidate all
-selection cases × 2 generations plus grades, pairwise, and fragility
-calls; `council harness downstream` spends per case 3 cached incumbent
-views + 1 candidate view + 2 judge calls + 2 pairwise calls plus cover
-calls; `council harness weekly` spends the sum of the selected steps;
-`council graders calibrate` spends 1 call per calibration item per
-grader (+1 retry on parse failure); `council pack publish` spends
-4 cached generations per selection case on both branches;
-`council config check --live` spends exactly 1 gateway call. These
-commands refuse without a key (exit 1, no network). Everything else —
+Spend per command lives in the [token-spend table](#token-spend)
+below — the in-code table is the only source, so it is not restated
+here. Framing worth knowing: `council serve` spends 4 model calls per
+request (3 views + 1 judge) with no cache reuse, plus 1 per rewrite;
+`council harness weekly --steps report` is the only harness subcommand
+that spends nothing. The spending commands are `council serve`,
+`council harness sentinel`, `council harness screen`,
+`council harness compare`, `council harness downstream`,
+`council harness weekly`, `council graders calibrate`,
+`council pack publish`, and `council config check --live` — every one
+of them refuses without a key (exit 1, no network). Everything else —
 `db migrate|prune`, `pack init|show|rollback`, `cases validate|load`,
 `graders status`, `flags list|confirm|dismiss`, `feedback summary`,
 `harness report`, `config show|reference|diagnose`,
@@ -150,10 +145,10 @@ the source of truth. `no` means the command makes no model calls.
 | Command | Spends | Calls | Per run |
 | --- | --- | --- | --- |
 | serve | yes | 4 model calls per request (3 views + 1 judge), 1 per rewrite | per POST /api/requests; no cache reuse |
-| harness sentinel | yes | 4 seats x harness_sentinel_count generations + drift rechecks + 2 pairwise calls | default 16 generations + admitted-graders x harness_calibration_recheck + 2 pairwise |
-| harness screen | yes | per candidate: harness_screen_cases x 2 generations + 2 grades | default 6 cases x 2 generations + 2 grades per candidate |
-| harness compare | yes | per candidate: all selection cases x 2 generations + 2 absolute grades x 2 graders + 2 pairwise + 2 fragility picks x 2 generations + 2 pairwise | per candidate over all selection cases |
-| harness downstream | yes | per case: 3 cached incumbent views + 1 candidate view + 2 judge calls + 2 pairwise + up to 2 cover calls + 2-call fresh judge repeat when close | per case |
+| harness sentinel | yes | 4 seats x harness_sentinel_count generations + drift rechecks (1 call per recheck item per admitted grader) + 1 pairwise comparison per seat x case (2 grader calls each, +1 reversal call each on tie/unable/close) | default 16 generations + rechecks + 16 comparisons |
+| harness screen | yes | per candidate: harness_screen_cases x (2 generations + 2 grades) | default 6 cases x (2 generations + 2 grades) per candidate |
+| harness compare | yes | per candidate: drift rechecks + all selection cases x (2 generations + 4 absolute grades + 1 pairwise comparison of 2 grader calls, +1 reversal call each on tie/unable/close) + up to 2 fragility picks x (2 fresh generations + 1 repeat comparison) | per candidate over all selection cases |
+| harness downstream | yes | per case: drift rechecks (once per run) + 3 cached incumbent views + 1 candidate view + 2 judge calls + 1 pairwise comparison (2 grader calls, +1 reversal call each on tie/unable/close) + up to 2 cover calls + 2 fresh judge calls and 1 repeat comparison when close | per case |
 | harness weekly | yes | sum of the selected steps | per --steps selection (default all) |
 | graders calibrate | yes | 1 call per calibration item per grader (+1 retry on parse failure) | per calibration item per grader |
 | pack publish | yes | 4 cached generations per selection case, on both branches | per publish (baselines generation happens either way) |

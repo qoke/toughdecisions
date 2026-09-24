@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -154,6 +155,10 @@ func isTimeoutErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// ErrTimeout is always wrapped with %w on the timeout paths
+	// (litellm.go semaphore-acquire and client-Do), so errors.Is matches.
+	// The "deadline exceeded" fallback covers context-deadline errors that
+	// arrive unwrapped (no exported sentinel exists for those).
 	if isErr(err, gateway.ErrTimeout) {
 		return true
 	}
@@ -164,6 +169,12 @@ func isTransportErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// No exported sentinel isolates transport failures: the transport path
+	// wraps gateway.ErrGateway together with the underlying error
+	// (litellm.go "gateway: do: %w: %w"), which errors.Is cannot
+	// distinguish from HTTP-status failures wrapping the same sentinel.
+	// Substring matching is the only honest classifier here; reported
+	// rather than papered over.
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "gateway: do:") || strings.Contains(s, "connection refused") || strings.Contains(s, "no such host")
 }
@@ -196,6 +207,9 @@ func httpStatusOf(err error) string {
 	return "status " + digits
 }
 
+// isErr matches wrapped gateway sentinel errors with errors.Is. Every
+// gateway failure path wraps its sentinel with %w (litellm.go, fake.go),
+// so errors.Is is exact; no message-substring fallback.
 func isErr(err, target error) bool {
-	return err != nil && strings.Contains(err.Error(), target.Error())
+	return errors.Is(err, target)
 }
