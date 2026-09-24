@@ -18,9 +18,12 @@ import (
 // `make build` precedes the first `db migrate`, and — only for surfaces
 // that actually invoke `db migrate` — that `mkdir -p data` precedes it. It
 // also asserts that no discovered doc/build file documents the forbidden
-// single-file `go run` form. Doc/build files are discovered by walking
-// (repo-root *.md, Makefile, Dockerfile, .github/workflows/*), never by a
-// hardcoded name list. Every failure names file:line.
+// single-file `go run` form, and that no discovered doc/build file leaks
+// secrets (dummy-key literals, sk-shaped keys, credential-bearing URLs, or
+// the private local endpoint as copy-pasteable config). Doc/build files
+// are discovered by walking (repo-root *.md, Makefile, Dockerfile,
+// .github/workflows/*), never by a hardcoded name list. Every failure
+// names file:line.
 func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 	root := shippedRepoRoot(t)
 
@@ -36,6 +39,31 @@ func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 				if goRunFileForm.MatchString(line) {
 					t.Errorf("%s:%d: forbidden single-file go run form: %s",
 						name, i+1, strings.TrimSpace(line))
+				}
+			}
+		})
+	}
+
+	// (d) No discovered doc/build surface may leak secrets: the local
+	// dummy-key literal, an sk-shaped key, a credential-bearing URL, or
+	// the private local endpoint presented as copy-pasteable config.
+	// Every failure names file:line.
+	secretRe := []*regexp.Regexp{
+		regexp.MustCompile(`local_dummy_key`),
+		regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),
+		regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]*:[^\s"'<>]*@`),
+		regexp.MustCompile(`[?&(](api_key|apikey|token|key|secret|password)=`),
+		regexp.MustCompile(`127\.0\.0\.1:4000`),
+	}
+	for _, name := range docsDocBuildFiles(t, root) {
+		name := name
+		t.Run("no-leaked-secrets/"+docsSubtestName(name), func(t *testing.T) {
+			for i, line := range docsReadFile(t, root, name) {
+				for _, re := range secretRe {
+					if re.MatchString(line) {
+						t.Errorf("%s:%d: possible secret in docs surface: %s",
+							name, i+1, strings.TrimSpace(line))
+					}
 				}
 			}
 		})

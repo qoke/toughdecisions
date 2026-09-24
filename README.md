@@ -1,150 +1,248 @@
 # Tough Decisions Council
 
-Two systems, one binary (`council`): the **production system** (`council serve`)
-and the **harness** (`council harness …`, `council pack …`, `council graders …`).
-They share storage, the gateway client, prompt assembly, and the published
-**production pack**. Production reads the active pack; only the harness writes packs.
+`council` is two systems in one binary: a **production API server**
+(`council serve`) and an **evaluation harness** (`council harness …`,
+`council pack …`, `council graders …`). They share storage, the gateway
+client, and the published production pack. Production reads the active
+pack; only the harness writes packs. There are no fallbacks, retries, or
+silent model substitutions anywhere: a failed call is recorded as absent,
+and a substituted model is a failure.
 
-Hard rules (visible in code, not just docs):
+## Quickstart
 
-1. No fallbacks, retries, or silent model substitution in production or harness.
-   A failed/timed-out call is recorded as absent; a substituted model is a failure.
-2. Unsupported sampling/reasoning settings are **rejected** at pack validation
-   and at call time, never dropped.
-3. Views run in parallel; the judge starts when all views finish **or** the views
-   deadline expires, whichever is first. Judge timeout → completed views stay
-   available; no retry.
-4. Every production answer is tied to an immutable input snapshot and an
-   immutable pack id.
-5. Graders never see model identities or prior results.
-
-## Bootstrap
+Build the binary, provision the store directory, migrate, load the
+shipped pack, then serve:
 
 ```sh
 make build
-mkdir -p data                            # store directory must exist before migration
-./bin/council db migrate                        # create/migrate the SQLite store
-./bin/council pack init --file config/pack.yaml # load the initial production pack
-./bin/council serve                             # production is usable from here
-# --- Phase 3+ (deferred) ---
-# author casepack/ and calibration.yaml
-./bin/council cases load
-./bin/council graders calibrate --all
-./bin/council pack publish --baselines-only     # Phase 5: fill baselines for the active pack
-# schedule: council harness weekly --notify
+mkdir -p data
+./bin/council db migrate
+./bin/council pack init --file config/pack.yaml
+./bin/council serve
 ```
 
-Alternative without building: `go run ./cmd/council …` (a `go run` naming an individual `.go` file compiles only that file — the package is nine files).
+Make a first request (the server listens on loopback by default, so no
+token is needed from the same machine):
 
-Exit codes: 0 ok, 1 error, 2 validation failure, 3 blocked
-(grader drift / checklist fail).
+```sh
+curl -s -X POST <your-host>/api/requests \
+  -H 'Content-Type: application/json' \
+  -d '{"card":{"situation":"...","options":["a","b"],"stakes":"..."}}'
+```
 
-## LiteLLM ops rules
-
-LiteLLM proxy aliases used by the council must have:
-
-- no `fallbacks`
-- `num_retries: 0`
-- `drop_params` disabled
-- pinned provider snapshot ids in the alias mapping
-
-The client never sends `fallbacks`, `num_retries`, or `drop_params`, and only
-includes `temperature`/`top_p`/`reasoning_effort` when set. `max_completion_tokens`
-is always set. LiteLLM returns a deployment hash (64-hex) in the
-`x-litellm-model-id` response header; substitution detection ignores it and
-reads the response body `model` field instead, so a hash there is expected,
-not an error.
+Every request fans out to 3 parallel views plus 1 judge call (see
+[token spend](#token-spend) below).
 
 ## Configuration
 
-Config loads from `COUNCIL_`-prefixed env vars with these defaults:
+Every setting is a `COUNCIL_`-prefixed environment variable. Set them
+with `export` in the shell:
 
-| Key | Default |
-|---|---|
-| `server_listen` | `127.0.0.1:8080` (loopback-only; any non-loopback bind requires `server_token`) |
-| `server_token` | `""` (secret, `COUNCIL_SERVER_TOKEN`; required for non-loopback binds; when set, the API also requires it via cookie or bearer on every route except `GET /healthz`, `GET /`, and `POST /api/session`) |
-| `db_path` | `./data/council.db` |
-| `gateway_base_url` | `http://localhost:4000` |
-| `pack_file` | `./config/pack.yaml` |
-| `graders_file` | `./config/graders.yaml` |
-| `models_file` | `./config/models.yaml` |
-| `candidates_file` | `./config/candidates.yaml` |
-| `views_deadline` / `judge_deadline` | `30s` |
+```sh
+export COUNCIL_GATEWAY_API_KEY='<your-gateway-api-key>'
+export COUNCIL_GATEWAY_BASE_URL='http://<your-litellm-host>:4000'
+```
 
-`gateway_base_url` (`COUNCIL_GATEWAY_BASE_URL`) is the LiteLLM proxy root
-**without** `/v1`: canonical `http://127.0.0.1:4000` (the code default
-`http://localhost:4000` is the local equivalent). The client appends
-`/v1/chat/completions`, so a base ending in `/v1` or `/` is normalised away
-but is not canonical.
+or in Docker with `-e`:
 
-`council serve` binds loopback-only by default (`server_listen` defaults to
-`127.0.0.1:8080`). Binding any non-loopback address (including an empty host
-such as `:8080`, `0.0.0.0`, or `[::]`) refuses to start unless `server_token`
-(`COUNCIL_SERVER_TOKEN`) is set. When the token is set, the HTTP API requires
-it on every route except `GET /healthz`, the static UI shell (`GET /`), and
-`POST /api/session`: clients obtain an HttpOnly `SameSite=Strict` cookie from
-`POST /api/session` with body `{"token": "..."}` (or send
-`Authorization: Bearer <token>`); query-string tokens are never accepted.
-Do not expose the service to an untrusted network without the token configured.
+```sh
+docker run -e COUNCIL_GATEWAY_API_KEY='<your-gateway-api-key>' \
+  -e COUNCIL_GATEWAY_BASE_URL='http://<your-litellm-host>:4000' …
+```
 
-Repo config: `config/pack.yaml` (4 seats: possibility, perspective,
-stress_tester, judge; views 2000 tokens, judge 3000), `config/models.yaml`
-(**a template, not a runnable config**), `config/graders.yaml` (two
-admitted selection graders from different families, one screening grader,
-one substitute grader), `config/candidates.yaml` (example view + judge
-challengers, max 3; empty list skips screen/compare/downstream).
-
-`config/models.yaml` must be adapted to the target proxy before use: each
-`id` is sent **verbatim** as the request model (there is no alias
-indirection), so every `id` must be a model that proxy actually serves, and
-every `expected_response_model_prefixes` entry must match what that
-deployment returns for that model.
-
-## Harness ops
-
-Cache keys (R-25 / §15) — changing the shared instructions invalidates the
-response cache (`prompt_pack_hash` feeds `store.ResponseCacheKey`); changing
-a grader (`config_hash`) or the rubric invalidates the grade cache while the
-response cache still hits; `--fresh` inserts with `MaxRepetition()+1`, so it
-always produces a new response key. A grader `config_hash` change starts
-unadmitted — recalibrate before compare.
-
-n8n wiring (§14): n8n is not in the live path. A Schedule node runs
-`council harness weekly --notify`, and when `notify_webhook_url` is set the
-report step `POST`s `{run_id, summary, report_markdown}` to that webhook
-(n8n → email/chat). Promotion stays manual: `council pack publish
---run <id> --candidate <key>` (refuses on a failing checklist unless
-`--force`). Optionally n8n polls `GET /api/metrics/summary`.
-
-Full bootstrap (copy-paste; sentinel refuses until baselines exist, so the
-baselines step must come before the first weekly run):
+The full key list with defaults and help text is authoritative in the
+binary itself — do not trust a hand-copied table:
 
 ```sh
 make build
-mkdir -p data                            # store directory must exist before migration
+./bin/council config reference   # every key, its env name, default
+./bin/council config diagnose    # effective values plus where each came from (env vs default)
+./bin/council config show        # effective values (secrets masked as ****)
+```
+
+Key settings: `COUNCIL_GATEWAY_BASE_URL` (LiteLLM proxy root, without
+`/v1`; the client appends `/v1/chat/completions`),
+`COUNCIL_GATEWAY_API_KEY` (secret, sent only in the `Authorization`
+header), `COUNCIL_DB_PATH` (default `./data/council.db`),
+`COUNCIL_SERVER_LISTEN` (default loopback `127.0.0.1:8080`),
+`COUNCIL_SERVER_TOKEN` (secret; required for any non-loopback bind, and
+then required on every API route except `GET /healthz`, `GET /`, and
+`POST /api/session`).
+
+## API keys and the fail-fast gate
+
+Set the gateway key before running anything that spends tokens:
+
+```sh
+export COUNCIL_GATEWAY_API_KEY='<your-gateway-api-key>'
+```
+
+Any spending command run without a key exits 1 immediately, with no
+network and no work done:
+
+```sh
+make build
+./bin/council harness sentinel
+# harness sentinel: missing COUNCIL_GATEWAY_API_KEY: run `council config diagnose` to inspect config, then export COUNCIL_GATEWAY_API_KEY='your-key'
+```
+
+The key itself is never printed, logged, or echoed back — only this
+actionable message naming the variable. One exception is fully offline:
+`council harness weekly --steps report` (report-only) exits 0 with no
+key. Check reachability with a single opt-in live call:
+
+```sh
+make build
+./bin/council config check --live
+# config check: ok (live call to "<model>" succeeded)
+```
+
+## Command reference
+
+Run `council` with no arguments for the command list, or ask any
+command or group for its own help:
+
+```sh
+make build
+./bin/council
+./bin/council serve --help
+./bin/council harness --help
+./bin/council harness weekly --help
+./bin/council help pack publish
+```
+
+An unknown subcommand exits 2 and points at help:
+
+```sh
+make build
+./bin/council bogus
+# unknown subcommand "bogus" (want one of: serve db pack cases graders harness flags config feedback help; run `council help` for help)
+```
+
+Spend per command (rough counts; exact wording lives in the table
+below): `council serve` spends 4 model calls per request (3 views +
+1 judge), 1 per rewrite; `council harness sentinel` spends
+4 seats × `harness_sentinel_count` generations plus drift rechecks and
+2 pairwise calls (default 16 generations); `council harness screen`
+spends per candidate `harness_screen_cases` × 2 generations + 2 grades
+(default 6 cases); `council harness compare` spends per candidate all
+selection cases × 2 generations plus grades, pairwise, and fragility
+calls; `council harness downstream` spends per case 3 cached incumbent
+views + 1 candidate view + 2 judge calls + 2 pairwise calls plus cover
+calls; `council harness weekly` spends the sum of the selected steps;
+`council graders calibrate` spends 1 call per calibration item per
+grader (+1 retry on parse failure); `council pack publish` spends
+4 cached generations per selection case on both branches;
+`council config check --live` spends exactly 1 gateway call. These
+commands refuse without a key (exit 1, no network). Everything else —
+`db migrate|prune`, `pack init|show|rollback`, `cases validate|load`,
+`graders status`, `flags list|confirm|dismiss`, `feedback summary`,
+`harness report`, `config show|reference|diagnose`,
+`harness weekly --steps report` — spends nothing and needs no key.
+
+## Token spend
+
+The table below is rendered from the in-code spend table; the code is
+the source of truth. `no` means the command makes no model calls.
+
+| Command | Spends | Calls | Per run |
+| --- | --- | --- | --- |
+| serve | yes | 4 model calls per request (3 views + 1 judge), 1 per rewrite | per POST /api/requests; no cache reuse |
+| harness sentinel | yes | 4 seats x harness_sentinel_count generations + drift rechecks + 2 pairwise calls | default 16 generations + admitted-graders x harness_calibration_recheck + 2 pairwise |
+| harness screen | yes | per candidate: harness_screen_cases x 2 generations + 2 grades | default 6 cases x 2 generations + 2 grades per candidate |
+| harness compare | yes | per candidate: all selection cases x 2 generations + 2 absolute grades x 2 graders + 2 pairwise + 2 fragility picks x 2 generations + 2 pairwise | per candidate over all selection cases |
+| harness downstream | yes | per case: 3 cached incumbent views + 1 candidate view + 2 judge calls + 2 pairwise + up to 2 cover calls + 2-call fresh judge repeat when close | per case |
+| harness weekly | yes | sum of the selected steps | per --steps selection (default all) |
+| graders calibrate | yes | 1 call per calibration item per grader (+1 retry on parse failure) | per calibration item per grader |
+| pack publish | yes | 4 cached generations per selection case, on both branches | per publish (baselines generation happens either way) |
+| config check --live | yes | exactly 1 gateway call | opt-in only, never called by any other path |
+| serve startup | no |  |  |
+| db migrate | no |  |  |
+| db prune | no |  |  |
+| pack init | no |  |  |
+| pack show | no |  |  |
+| pack rollback | no |  |  |
+| cases validate | no |  |  |
+| cases load | no |  |  |
+| graders status | no |  |  |
+| flags list | no |  |  |
+| flags confirm | no |  |  |
+| flags dismiss | no |  |  |
+| feedback summary | no |  |  |
+| harness report | no |  |  |
+| config show | no |  |  |
+| config reference | no |  |  |
+| config diagnose | no |  |  |
+| config check | no |  |  |
+
+## Troubleshooting
+
+The errors users actually hit:
+
+- **No key**: `harness sentinel: missing COUNCIL_GATEWAY_API_KEY:
+  run `+"`council config diagnose`"+` to inspect config, then export
+  COUNCIL_GATEWAY_API_KEY='your-key'` — export the key; nothing was
+  spent and nothing was sent.
+- **Nothing to check**: `config check: nothing to check without --live`
+  — `config check` needs the `--live` flag to make its one call.
+- **Unknown command**: `unknown subcommand "bogus" (want one of: serve
+  db pack cases graders harness flags config feedback help; run
+  `+"`council help`"+` for help)` (exit 2) — check the name, or run
+  `council help`.
+- **Bad flag**: exit 2 from the flag parser (e.g. `harness weekly:
+  harness: unknown weekly step "bogus" (want
+  sentinel,screen,compare,downstream,report)`) — fix the flag value.
+- **Non-loopback without token**: `serve: non-loopback listen "…"
+  requires server_token (COUNCIL_SERVER_TOKEN)` — set
+  `COUNCIL_SERVER_TOKEN` or bind loopback.
+- **Sentinel before baselines**: `harness sentinel: … pack publish
+  --baselines-only` — run `council pack publish --baselines-only`
+  first.
+- **Blocked (exit 3)**: grader drift or a failing promotion checklist
+  (e.g. `council pack publish` refusing without `--force`) — inspect
+  the report, do not retry blindly; there are no automatic retries.
+- **Bad config value**: `serve: validation failed for 'log_level'
+  (value=bogus, from env): value must be one of [debug info warn
+  error]` — fix the env var.
+
+## Serve and UI
+
+```sh
+make build
+mkdir -p data
+./bin/council db migrate
+./bin/council serve
+```
+
+`council serve` binds loopback-only by default. Binding any
+non-loopback address refuses to start unless `COUNCIL_SERVER_TOKEN` is
+set; when set, the API requires it on every route except
+`GET /healthz`, the static UI shell (`GET /`), and `POST /api/session`.
+Clients obtain an HttpOnly `SameSite=Strict` cookie from
+`POST /api/session` with body `{"token": "…"}` (or send
+`Authorization: Bearer <token>`); query-string tokens are never
+accepted. Do not expose the service to an untrusted network without
+the token configured.
+
+Harness ops: `council harness weekly --notify` runs the weekly steps
+and, when `notify_webhook_url` is set, `POST`s the report to that
+webhook (e.g. n8n → email/chat). Promotion stays manual:
+`council pack publish --run <id> --candidate <key>` refuses on a
+failing checklist unless `--force`. Full harness setup, copy-paste:
+
+```sh
+make build
+mkdir -p data
 ./bin/council db migrate
 ./bin/council pack init --file config/pack.yaml
-./bin/council serve                                    # production usable from here
-# --- harness setup ---
-# author casepack/ and casepack/calibration.yaml, then:
 ./bin/council cases validate
 ./bin/council cases load
 ./bin/council graders calibrate --all
-./bin/council graders status                           # both selection graders admitted
-./bin/council pack publish --baselines-only            # fill baselines for the active pack
-./bin/council harness sentinel                         # fails naming --baselines-only if skipped
-./bin/council harness weekly --notify                  # full run: sentinel,screen,compare,downstream,report
+./bin/council graders status
+./bin/council pack publish --baselines-only
+./bin/council harness sentinel
+./bin/council harness weekly --notify
 ```
 
-## What is implemented vs deferred
-
-Implemented (Phases 0–2): store + migrations, gateway (real + fake), prompt
-assembly, lenient schema parsing, model capabilities + pack init/show/rollback,
-production pipeline, HTTP API + SSE + UI, `db migrate`, `pack init|show|rollback`,
-`feedback summary`.
-
-Deferred: none — Phases 3–6 are wired (`cases validate|load`,
-`graders calibrate|status`, `flags …`, `harness weekly|sentinel|screen|
-compare|downstream|report`, `pack publish` with checklist/force,
-`db prune` with retention). `pack publish` exits 3 on a failing checklist
-without `--force`; grader drift exits 3.
+Exit codes: 0 ok, 1 error, 2 validation failure, 3 blocked
+(grader drift / checklist fail).
