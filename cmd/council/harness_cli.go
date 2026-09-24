@@ -37,7 +37,7 @@ func harnessWeekly(args []string) int {
 	if parsed.Sentinel || parsed.Screen || parsed.Compare || parsed.Downstream {
 		cfg, err := config.Load()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "harness weekly: %v\n", err)
+			fmt.Fprintf(os.Stderr, "harness weekly: %s\n", loadErrMessage(err))
 			return exitError
 		}
 		if err := requireGatewayKey(cfg); err != nil {
@@ -126,7 +126,7 @@ func harnessSentinel(args []string) int {
 		return exitValidation
 	}
 	if cfg, err := config.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "harness sentinel: %v\n", err)
+		fmt.Fprintf(os.Stderr, "harness sentinel: %s\n", loadErrMessage(err))
 		return exitError
 	} else if err := requireGatewayKey(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "harness sentinel: %v\n", err)
@@ -165,7 +165,7 @@ func harnessScreen(args []string) int {
 		return exitValidation
 	}
 	if keyCfg, err := config.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "harness screen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "harness screen: %s\n", loadErrMessage(err))
 		return exitError
 	} else if err := requireGatewayKey(keyCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "harness screen: %v\n", err)
@@ -214,7 +214,7 @@ func harnessCompare(args []string) int {
 		return exitValidation
 	}
 	if keyCfg, err := config.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "harness compare: %v\n", err)
+		fmt.Fprintf(os.Stderr, "harness compare: %s\n", loadErrMessage(err))
 		return exitError
 	} else if err := requireGatewayKey(keyCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "harness compare: %v\n", err)
@@ -275,7 +275,7 @@ func harnessDownstream(args []string) int {
 		return exitValidation
 	}
 	if keyCfg, err := config.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "harness downstream: %v\n", err)
+		fmt.Fprintf(os.Stderr, "harness downstream: %s\n", loadErrMessage(err))
 		return exitError
 	} else if err := requireGatewayKey(keyCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "harness downstream: %v\n", err)

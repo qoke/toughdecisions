@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
+	cfggo "github.com/iqhive/cfggo"
 	"github.com/qoke/toughdecisions/internal/config"
 	"github.com/qoke/toughdecisions/internal/gateway"
 	"github.com/qoke/toughdecisions/internal/logx"
@@ -38,19 +43,41 @@ func configCmd(args []string) int {
 }
 
 // redactLoadError redacts the configured secret values
-// (COUNCIL_GATEWAY_API_KEY, COUNCIL_SERVER_TOKEN) from a config.Load()
-// error string before it is printed. Pinned cfggo v1.0.34 quotes raw env
-// input for non-secret TYPED keys, so a secret pasted into e.g.
-// COUNCIL_GATEWAY_MAX_CONCURRENT would otherwise be echoed verbatim. The
-// rest of the message is kept so users still learn which setting is
-// invalid (e.g. `cannot parse int "***"`).
+// (COUNCIL_GATEWAY_API_KEY, COUNCIL_SERVER_TOKEN, raw and trimmed) and any
+// token-shaped literal (sk- + >=8 chars, plus the credential shapes the
+// docs scan treats as secrets) from a config.Load() error or cfggo log
+// line before it is printed. Pinned cfggo v1.0.34 quotes raw env input
+// for non-secret TYPED keys, so a secret pasted into e.g.
+// COUNCIL_GATEWAY_MAX_CONCURRENT would otherwise be echoed verbatim —
+// possibly with ONLY the mistyped copy present, so no configured value
+// exists to match. The rest of the message is kept so users still learn
+// which setting is invalid (e.g. `cannot parse int "***"`).
 func redactLoadError(msg string) string {
 	for _, env := range []string{"COUNCIL_GATEWAY_API_KEY", "COUNCIL_SERVER_TOKEN"} {
 		if v, ok := lookupSecretEnv(env); ok {
 			msg = strings.ReplaceAll(msg, v, "***")
+			if t := strings.TrimSpace(v); t != "" && t != v {
+				msg = strings.ReplaceAll(msg, t, "***")
+			}
 		}
 	}
+	for _, re := range secretShapeRes {
+		msg = re.ReplaceAllString(msg, "***")
+	}
 	return msg
+}
+
+// secretShapeRes matches token-shaped literals for redaction: the same
+// credential shapes the docs secret scan treats as secrets. Every pattern
+// requires >=8 non-placeholder characters so short/common words are never
+// redacted; <...> placeholders never match these shapes.
+var secretShapeRes = []*regexp.Regexp{
+	regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),
+	regexp.MustCompile(`ghp_[A-Za-z0-9]{20,}`),
+	regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`),
+	regexp.MustCompile(`AIza[0-9A-Za-z_-]{30,}`),
+	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
+	regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.`),
 }
 
 // lookupSecretEnv returns the raw env value for a secret-tagged var when it
@@ -68,6 +95,56 @@ func lookupSecretEnv(name string) (string, bool) {
 // redacted (see redactLoadError).
 func loadErrMessage(err error) string {
 	return redactLoadError(err.Error())
+}
+
+// newLoadError wraps a config.Load() failure with its message already
+// redacted, so every openStore consumer (pack, graders, cases, flags,
+// feedback, harness) is safe printing it with %v without finding its own
+// redaction call. Message content is unchanged apart from redaction.
+func newLoadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(redactLoadError(err.Error()))
+}
+
+// redactingWriter is an io.Writer that redacts secret values from every
+// chunk before forwarding it (used for cfggo's log output, whose lines
+// bypass our error-string redaction). It never replaces os.Stderr.
+type redactingWriter struct {
+	out io.Writer
+}
+
+func (w redactingWriter) Write(p []byte) (int, error) {
+	_, err := io.WriteString(w.out, redactLoadError(string(p)))
+	return len(p), err
+}
+
+// installCfggoRedaction routes cfggo's default log output through the
+// redacting writer, once per process, before any config.Load(). cfggo
+// v1.0.34 snapshots GlobalLogger() into each Structure at Init
+// (structure.go:495 `c.logger = GlobalLogger()`), and SetLogOutput
+// replaces the global with a logger writing to w (api.go:146-150), so
+// every Load-time log line passes redactLoadError while diagnostics
+// (level, key names) are preserved. Idempotent and safe under -race.
+var cfggoRedactOnce sync.Once
+
+func installCfggoRedaction() {
+	cfggoRedactOnce.Do(func() {
+		cfggo.SetLogOutput(redactingWriter{out: os.Stderr})
+	})
+}
+
+// captureCfggoLogs redirects cfggo's global log output to buf for the
+// duration of fn and restores the redacting stderr writer after. Tests
+// must use this (not os.Stderr swaps) because cfggo holds the writer, not
+// the *os.File. buf receives the REDACTED form (what stderr actually
+// shows), not cfggo's raw bytes. Restores even if fn panics; not safe
+// for parallel tests.
+func captureCfggoLogs(buf *bytes.Buffer) func() {
+	prev := redactingWriter{out: os.Stderr}
+	cfggo.SetLogOutput(io.MultiWriter(prev, redactingWriter{out: buf}))
+	return func() { cfggo.SetLogOutput(prev) }
 }
 
 // configRender prints cfg.String / ConfigReference / Diagnose output. All
@@ -172,8 +249,9 @@ func firstRegistryModel(path string) (string, error) {
 }
 
 // liveFailureMessage renders an allowlisted failure: HTTP status plus a
-// reason class (timeout, transport, gateway, bad response). It never echoes
-// the key, a request/response body, or a credential-bearing URL.
+// reason class (redirect refusal, timeout, transport, gateway, bad
+// response). It never echoes the key, a request/response body, or a
+// credential-bearing URL.
 func liveFailureMessage(cfg *config.Config, err error) string {
 	host := ""
 	if u, uerr := url.Parse(cfg.GatewayBaseURL()); uerr == nil {
@@ -181,6 +259,8 @@ func liveFailureMessage(cfg *config.Config, err error) string {
 	}
 	class := "gateway error"
 	switch {
+	case isRedirectErr(err):
+		class = "redirect refused (gateway client does not follow redirects)"
 	case isTimeoutErr(err):
 		class = "timeout"
 	case isTransportErr(err):
@@ -225,6 +305,33 @@ func isTransportErr(err error) bool {
 
 func isBadJSONErr(err error) bool {
 	return isErr(err, gateway.ErrBadJSON)
+}
+
+// isRedirectErr reports a refused 3xx: the shared no-redirect client
+// surfaces it through litellm.go's status path (e.g. "gateway: status
+// 302: unparseable error body"), keeping the Authorization header off the
+// redirect target. Checked before transport so a 3xx names the refusal.
+func isRedirectErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	idx := strings.Index(s, "status ")
+	if idx < 0 {
+		return false
+	}
+	rest := s[idx+len("status "):]
+	digits := ""
+	for _, c := range rest {
+		if c < '0' || c > '9' {
+			break
+		}
+		digits += string(c)
+	}
+	if len(digits) != 3 || digits[0] != '3' {
+		return false
+	}
+	return true
 }
 
 // httpStatusOf extracts "status NNN" from gateway errors, else "no status".

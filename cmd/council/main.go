@@ -23,6 +23,7 @@ func main() {
 }
 
 func run(args []string) int {
+	installCfggoRedaction()
 	if len(args) == 0 {
 		renderRootHelp()
 		return exitOK

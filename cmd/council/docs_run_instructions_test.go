@@ -21,8 +21,9 @@ import (
 // single-file `go run` form, and that no discovered doc/build file leaks
 // known secret shapes (key prefixes, JWT/PEM, credential URLs/params, or
 // the private local endpoint as copy-pasteable config; line-split secrets,
-// base64 blobs, and surfaces outside the walk are NOT covered). Doc/build
-// files are discovered by walking (repo-root *.md, Makefile, Dockerfile,
+// base64 blobs, `export VAR=<non-sk value>`, bare `Bearer <token>`,
+// `localhost:4000`, and surfaces outside the walk are NOT covered).
+// Doc/build files are discovered by walking (repo-root *.md, Makefile, Dockerfile,
 // .github/workflows/*), never by a hardcoded name list. Every failure
 // names file:line.
 func TestDocsRunInstructionsAreExecutable(t *testing.T) {
@@ -53,8 +54,10 @@ func TestDocsRunInstructionsAreExecutable(t *testing.T) {
 	// private local endpoint presented as copy-pasteable config.
 	// Every failure names file:line.
 	// Residual gaps this guard knowingly does NOT cover: secrets split
-	// across lines, base64-encoded or otherwise obfuscated blobs, and
-	// surfaces outside the walk (docs/**, scripts, *.yaml, testdata).
+	// across lines, base64-encoded or otherwise obfuscated blobs,
+	// `export VAR=<non-sk value>`, a bare `Bearer <token>`,
+	// `localhost:4000` (bare localhost without 127.0.0.1:4000 is allowed),
+	// and surfaces outside the walk (docs/**, scripts, *.yaml, testdata).
 	secretRe := []*regexp.Regexp{
 		regexp.MustCompile(`local_dummy_key`),
 		regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),

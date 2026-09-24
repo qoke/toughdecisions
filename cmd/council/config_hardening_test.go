@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +13,9 @@ import (
 // TestConfigLoadErrorRedactsSecrets is the MEDIUM 1 regression test: a
 // secret-shaped value pasted into a TYPED var must not be echoed by the
 // config.Load() failure. It asserts exit 1, that the secret appears in
-// neither stdout nor stderr, and that the message still names the
-// offending setting. It fails without redactLoadError.
+// neither stdout, captured stderr, nor cfggo log output, and that the
+// message still names the offending setting. It fails without
+// redactLoadError.
 func TestConfigLoadErrorRedactsSecrets(t *testing.T) {
 	const secret = "sk-live-abc123"
 	// The real key is configured and ALSO mistyped into a typed var: the
@@ -26,11 +28,14 @@ func TestConfigLoadErrorRedactsSecrets(t *testing.T) {
 			oldErr := os.Stderr
 			r, w, _ := os.Pipe()
 			os.Stderr = w
+			var logs bytes.Buffer
+			restore := captureCfggoLogs(&logs)
 			out, code := captureStdout(t, func() int { return configCmd([]string{sub}) })
+			restore()
 			_ = w.Close()
 			os.Stderr = oldErr
 			raw, _ := io.ReadAll(r)
-			msg := string(raw)
+			msg := string(raw) + logs.String()
 			if code != exitError {
 				t.Fatalf("config %s = %d, want %d (out=%q err=%q)", sub, code, exitError, out, msg)
 			}
@@ -41,6 +46,36 @@ func TestConfigLoadErrorRedactsSecrets(t *testing.T) {
 				t.Fatalf("config %s = %q %q, want it to name gateway_max_concurrent", sub, out, msg)
 			}
 		})
+	}
+}
+
+// TestConfigLoadErrorRedactsUnconfiguredSecret covers the token-only case:
+// the secret exists ONLY inside the mistyped typed var, so no configured
+// value exists to match — the sk-shape pattern must still mask it in the
+// error string and cfggo log output.
+func TestConfigLoadErrorRedactsUnconfiguredSecret(t *testing.T) {
+	const secret = "sk-dummy-mistype-111"
+	t.Setenv("COUNCIL_GATEWAY_MAX_CONCURRENT", secret)
+	t.Setenv("COUNCIL_GATEWAY_API_KEY", "")
+	oldErr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	var logs bytes.Buffer
+	restore := captureCfggoLogs(&logs)
+	out, code := captureStdout(t, func() int { return configCmd([]string{"show"}) })
+	restore()
+	_ = w.Close()
+	os.Stderr = oldErr
+	raw, _ := io.ReadAll(r)
+	msg := string(raw) + logs.String()
+	if code != exitError {
+		t.Fatalf("config show = %d, want %d (out=%q err=%q)", code, exitError, out, msg)
+	}
+	if strings.Contains(out, secret) || strings.Contains(msg, secret) {
+		t.Fatalf("config show echoed the unconfigured secret (out=%q err=%q)", out, msg)
+	}
+	if !strings.Contains(strings.ToLower(out+msg), "gateway_max_concurrent") {
+		t.Fatalf("config show = %q %q, want it to name gateway_max_concurrent", out, msg)
 	}
 }
 
@@ -95,8 +130,8 @@ func TestConfigCheckLiveDoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("redirect target hit %d times, want 0 (no credential forwarding)", targetHits)
 	}
 	lower := strings.ToLower(msg)
-	if !strings.Contains(lower, "status") && !strings.Contains(lower, "gateway") && !strings.Contains(lower, "transport") && !strings.Contains(lower, "timeout") && !strings.Contains(lower, "bad response") {
-		t.Fatalf("failure message = %q, want allowlisted text", msg)
+	if !strings.Contains(lower, "status 302") || !strings.Contains(lower, "redirect") {
+		t.Fatalf("failure message = %q, want the 3xx status and redirect refusal", msg)
 	}
 }
 

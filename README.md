@@ -103,6 +103,9 @@ make build
 # config check: ok (live call to "<model>" succeeded)
 ```
 
+The gateway client does not follow redirects, so a reverse proxy must be
+configured at `gateway_base_url` rather than redirecting to it.
+
 ## Command reference
 
 Run `council` with no arguments for the command list, or ask any

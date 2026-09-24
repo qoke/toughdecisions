@@ -19,11 +19,13 @@ func phaseStub(name string, phase int) handler {
 	}
 }
 
-// openStore loads config and opens the migrated store.
+// openStore loads config and opens the migrated store. A Load() failure is
+// redacted (see redactLoadError) so a secret mistyped into a typed var
+// cannot leak through any command that prints an openStore error.
 func openStore() (*store.DB, *config.Config, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, newLoadError(err)
 	}
 	db, err := store.Open(cfg.DBPath())
 	if err != nil {
