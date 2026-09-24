@@ -13,7 +13,7 @@ type Config struct {
 	ServerListen              func() string        `cfggo:"server_listen" default:"127.0.0.1:8080" help:"HTTP listen address"`
 	ServerToken               func() string        `cfggo:"server_token" default:"" secret:"true" help:"Required bearer token for non-loopback binds; enables cookie/bearer auth"`
 	DBPath                    func() string        `cfggo:"db_path" default:"./data/council.db" help:"SQLite database path"`
-	GatewayBaseURL            func() string        `cfggo:"gateway_base_url" default:"http://localhost:4000" help:"LiteLLM base URL"`
+	GatewayBaseURL            func() string        `cfggo:"gateway_base_url" default:"http://localhost:4000" secret:"true" help:"LiteLLM base URL"`
 	GatewayAPIKey             func() string        `cfggo:"gateway_api_key" default:"" secret:"true" help:"LiteLLM API key"`
 	GatewayMaxConcurrent      func() int           `cfggo:"gateway_max_concurrent" default:"8" help:"Max concurrent gateway calls"`
 	ViewsDeadline             func() time.Duration `cfggo:"views_deadline" default:"30s" help:"Parallel views deadline"`
@@ -26,7 +26,7 @@ type Config struct {
 	ModelsFile                func() string        `cfggo:"models_file" default:"./config/models.yaml" help:"Model capabilities file"`
 	CandidatesFile            func() string        `cfggo:"candidates_file" default:"./config/candidates.yaml" help:"Candidates file"`
 	ReportsDir                func() string        `cfggo:"reports_dir" default:"./reports" help:"Reports output directory"`
-	NotifyWebhookURL          func() string        `cfggo:"notify_webhook_url" default:"" help:"n8n webhook URL; empty skips notify"`
+	NotifyWebhookURL          func() string        `cfggo:"notify_webhook_url" default:"" secret:"true" help:"n8n webhook URL; empty skips notify"`
 	HarnessConcurrency        func() int           `cfggo:"harness_concurrency" default:"3" help:"Harness worker pool size"`
 	HarnessSentinelCount      func() int           `cfggo:"harness_sentinel_count" default:"4" help:"Sentinel cases per run"`
 	HarnessScreenCases        func() int           `cfggo:"harness_screen_cases" default:"6" help:"Screen cases per candidate"`

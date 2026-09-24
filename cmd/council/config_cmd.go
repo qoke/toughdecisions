@@ -43,17 +43,19 @@ func configCmd(args []string) int {
 }
 
 // redactLoadError redacts the configured secret values
-// (COUNCIL_GATEWAY_API_KEY, COUNCIL_SERVER_TOKEN, raw and trimmed) and any
+// (COUNCIL_GATEWAY_API_KEY, COUNCIL_SERVER_TOKEN, COUNCIL_GATEWAY_BASE_URL,
+// COUNCIL_NOTIFY_WEBHOOK_URL, raw and trimmed) and any
 // token-shaped literal (sk- + >=8 chars, plus the credential shapes the
 // docs scan treats as secrets) from a config.Load() error or cfggo log
-// line before it is printed. Pinned cfggo v1.0.34 quotes raw env input
-// for non-secret TYPED keys, so a secret pasted into e.g.
-// COUNCIL_GATEWAY_MAX_CONCURRENT would otherwise be echoed verbatim —
+// line before it is printed. Pinned cfggo v1.0.35 redacts load-path errors
+// and env-set log lines for secret-tagged keys at the source, and quotes
+// raw env input only for non-secret TYPED keys, so a secret pasted into
+// e.g. COUNCIL_GATEWAY_MAX_CONCURRENT would otherwise be echoed verbatim —
 // possibly with ONLY the mistyped copy present, so no configured value
 // exists to match. The rest of the message is kept so users still learn
 // which setting is invalid (e.g. `cannot parse int "***"`).
 func redactLoadError(msg string) string {
-	for _, env := range []string{"COUNCIL_GATEWAY_API_KEY", "COUNCIL_SERVER_TOKEN"} {
+	for _, env := range []string{"COUNCIL_GATEWAY_API_KEY", "COUNCIL_SERVER_TOKEN", "COUNCIL_GATEWAY_BASE_URL", "COUNCIL_NOTIFY_WEBHOOK_URL"} {
 		if v, ok := lookupSecretEnv(env); ok {
 			// Minimum length >= 8: below that a value carries no meaningful
 			// secrecy (a real gateway key is long), and redacting it mangles
@@ -139,7 +141,7 @@ func (w redactingWriter) Write(p []byte) (int, error) {
 
 // installCfggoRedaction routes cfggo's default log output through the
 // redacting writer, once per process, before any config.Load(). cfggo
-// v1.0.34 snapshots GlobalLogger() into each Structure at Init
+// v1.0.35 snapshots GlobalLogger() into each Structure at Init
 // (structure.go:495 `c.logger = GlobalLogger()`), and SetLogOutput
 // replaces the global with a logger writing to w (api.go:146-150), so
 // every Load-time log line passes redactLoadError while diagnostics

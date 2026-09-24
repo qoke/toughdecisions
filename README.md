@@ -62,9 +62,9 @@ make build
 ./bin/council config show        # effective values (fields marked secret masked as ****)
 ```
 
-The renders mask only fields marked `secret`; `gateway_base_url` and
-`notify_webhook_url` are not secret-tagged, so they print in full — do
-not embed tokens in them.
+The renders mask every field marked `secret` (`gateway_api_key`,
+`server_token`, `gateway_base_url`, `notify_webhook_url`) as `****` — do
+not embed tokens in any other setting.
 
 Key settings: `COUNCIL_GATEWAY_BASE_URL` (LiteLLM proxy root, without
 `/v1`; the client appends `/v1/chat/completions`),

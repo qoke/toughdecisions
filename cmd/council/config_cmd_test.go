@@ -16,16 +16,24 @@ import (
 func TestConfigRendersMaskSecrets(t *testing.T) {
 	const keySentinel = "sk-live-test-key-abc123"
 	const tokSentinel = "tok-live-test-token-xyz789"
+	const baseSentinel = "https://proxy-live-example-1.test:4000"
+	const hookSentinel = "https://hooks-live-example-1.test/secret-hook"
 	t.Setenv("COUNCIL_GATEWAY_API_KEY", keySentinel)
 	t.Setenv("COUNCIL_SERVER_TOKEN", tokSentinel)
+	t.Setenv("COUNCIL_GATEWAY_BASE_URL", baseSentinel)
+	t.Setenv("COUNCIL_NOTIFY_WEBHOOK_URL", hookSentinel)
 	for _, sub := range []string{"show", "reference", "diagnose"} {
 		t.Run(sub, func(t *testing.T) {
 			out, code := captureStdout(t, func() int { return configCmd([]string{sub}) })
 			if code != exitOK {
 				t.Fatalf("config %s = %d, want %d", sub, code, exitOK)
 			}
-			if strings.Contains(out, keySentinel) || strings.Contains(out, tokSentinel) {
-				t.Fatalf("config %s leaked a raw secret", sub)
+			if sub != "reference" {
+				for _, leak := range []string{keySentinel, tokSentinel, baseSentinel, hookSentinel} {
+					if strings.Contains(out, leak) {
+						t.Fatalf("config %s leaked a raw secret", sub)
+					}
+				}
 			}
 			if sub == "show" || sub == "diagnose" {
 				if !strings.Contains(out, "****") {

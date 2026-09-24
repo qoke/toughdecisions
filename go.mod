@@ -3,7 +3,7 @@ module github.com/qoke/toughdecisions
 go 1.25.0
 
 require (
-	github.com/iqhive/cfggo v1.0.34
+	github.com/iqhive/cfggo v1.0.35
 	github.com/iqhive/iqlog v1.0.26
 	github.com/oklog/ulid/v2 v2.1.2
 	gopkg.in/yaml.v3 v3.0.1

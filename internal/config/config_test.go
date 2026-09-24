@@ -53,6 +53,8 @@ func TestLoadEnvOverride(t *testing.T) {
 func TestRedactedOutputMasksSecret(t *testing.T) {
 	t.Setenv("COUNCIL_GATEWAY_API_KEY", "super-secret-value")
 	t.Setenv("COUNCIL_SERVER_TOKEN", "server-secret-value")
+	t.Setenv("COUNCIL_GATEWAY_BASE_URL", "https://proxy.example.com:4000")
+	t.Setenv("COUNCIL_NOTIFY_WEBHOOK_URL", "https://hooks.example.com/secret-hook")
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -63,6 +65,12 @@ func TestRedactedOutputMasksSecret(t *testing.T) {
 	}
 	if strings.Contains(out, "server-secret-value") {
 		t.Fatalf("redacted output leaks server_token")
+	}
+	if strings.Contains(out, "proxy.example.com") {
+		t.Fatalf("redacted output leaks gateway_base_url")
+	}
+	if strings.Contains(out, "hooks.example.com") {
+		t.Fatalf("redacted output leaks notify_webhook_url")
 	}
 }
 
