@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestConfigMistypedSecretBlackBox execs the BUILT binary (not run()
@@ -16,6 +18,9 @@ import (
 // them — only a real subprocess sees the fd output. Green requires both
 // the redacting cfggo writer (installCfggoRedaction) and the redacted
 // error string; neutering either must fail this test.
+// The serve/pack-publish rows automate the auditor's manual check that
+// openStore consumers are clean via newLoadError; serve/publish exit 1 at
+// Load before binding or touching the gateway.
 func TestConfigMistypedSecretBlackBox(t *testing.T) {
 	const secret = "sk-dummy-mistype-111"
 	bin := filepath.Join(t.TempDir(), "council")
@@ -30,9 +35,13 @@ func TestConfigMistypedSecretBlackBox(t *testing.T) {
 		{"config", "diagnose"},
 		{"config", "check", "--live"},
 		{"harness", "sentinel"},
+		{"serve"},
+		{"pack", "publish", "--run", "r1", "--candidate", "cand-a"},
 	} {
 		t.Run(strings.Join(args, "-"), func(t *testing.T) {
-			cmd := exec.Command(bin, args...)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, bin, args...)
 			cmd.Env = append(os.Environ(),
 				"COUNCIL_GATEWAY_MAX_CONCURRENT="+secret,
 				"COUNCIL_GATEWAY_API_KEY=",

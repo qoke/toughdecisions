@@ -79,6 +79,72 @@ func TestConfigLoadErrorRedactsUnconfiguredSecret(t *testing.T) {
 	}
 }
 
+// TestConfigLoadErrorRedactsNonShapeSecret covers the env-value path alone:
+// a NON-shape secret (no sk-/ghp_/JWT pattern) configured AND mistyped can
+// only be masked by the env-value loop — neutering that loop must fail this
+// test. Every prior test secret was sk-shaped, so the shapes carried them.
+func TestConfigLoadErrorRedactsNonShapeSecret(t *testing.T) {
+	const secret = "hunter2-mistyped-zz"
+	t.Setenv("COUNCIL_GATEWAY_API_KEY", secret)
+	t.Setenv("COUNCIL_GATEWAY_MAX_CONCURRENT", secret)
+	oldErr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	var logs bytes.Buffer
+	restore := captureCfggoLogs(&logs)
+	out, code := captureStdout(t, func() int { return configCmd([]string{"show"}) })
+	restore()
+	_ = w.Close()
+	os.Stderr = oldErr
+	raw, _ := io.ReadAll(r)
+	msg := string(raw) + logs.String()
+	if code != exitError {
+		t.Fatalf("config show = %d, want %d (out=%q err=%q)", code, exitError, out, msg)
+	}
+	if strings.Contains(out, secret) || strings.Contains(msg, secret) {
+		t.Fatalf("config show echoed the non-shape secret (out=%q err=%q)", out, msg)
+	}
+	if !strings.Contains(strings.ToLower(out+msg), "gateway_max_concurrent") {
+		t.Fatalf("config show = %q %q, want it to name gateway_max_concurrent", out, msg)
+	}
+}
+
+// TestConfigShortKeyKeepsDiagnosticsReadable is the MEDIUM short-key guard:
+// a short configured key (no meaningful secrecy) must NOT mangle the
+// message — with COUNCIL_GATEWAY_API_KEY=test (and e) plus a mistyped typed
+// var, the error stays fully readable and names the offending setting.
+func TestConfigShortKeyKeepsDiagnosticsReadable(t *testing.T) {
+	for _, key := range []string{"test", "e"} {
+		t.Run("key="+key, func(t *testing.T) {
+			t.Setenv("COUNCIL_GATEWAY_API_KEY", key)
+			t.Setenv("COUNCIL_GATEWAY_MAX_CONCURRENT", "not-an-int")
+			oldErr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+			var logs bytes.Buffer
+			restore := captureCfggoLogs(&logs)
+			out, code := captureStdout(t, func() int { return configCmd([]string{"show"}) })
+			restore()
+			_ = w.Close()
+			os.Stderr = oldErr
+			raw, _ := io.ReadAll(r)
+			msg := string(raw) + logs.String()
+			if code != exitError {
+				t.Fatalf("config show = %d, want %d (out=%q err=%q)", code, exitError, out, msg)
+			}
+			combined := strings.ToLower(out + msg)
+			for _, want := range []string{"gateway_max_concurrent", "cannot parse int"} {
+				if !strings.Contains(combined, want) {
+					t.Fatalf("config show = %q %q, want readable message naming %q", out, msg, want)
+				}
+			}
+			if strings.Contains(out+msg, "***") {
+				t.Fatalf("config show over-redacted with short key (out=%q err=%q)", out, msg)
+			}
+		})
+	}
+}
+
 // TestConfigShowRejectsPositionals covers L4: extra positionals exit 2.
 func TestConfigShowRejectsPositionals(t *testing.T) {
 	oldErr := os.Stderr

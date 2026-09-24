@@ -55,8 +55,18 @@ func configCmd(args []string) int {
 func redactLoadError(msg string) string {
 	for _, env := range []string{"COUNCIL_GATEWAY_API_KEY", "COUNCIL_SERVER_TOKEN"} {
 		if v, ok := lookupSecretEnv(env); ok {
+			// Minimum length >= 8: below that a value carries no meaningful
+			// secrecy (a real gateway key is long), and redacting it mangles
+			// the actionable message itself (e.g. value "e" rewrites
+			// "gateway_max_concurrent" into "gat***way..."), defeating this
+			// topic's "configuration errors must be clear" goal — so the
+			// short value is knowingly allowed through. Shape rules already
+			// require >=8 for the same reason.
+			if len(v) < 8 {
+				continue
+			}
 			msg = strings.ReplaceAll(msg, v, "***")
-			if t := strings.TrimSpace(v); t != "" && t != v {
+			if t := strings.TrimSpace(v); t != "" && t != v && len(t) >= 8 {
 				msg = strings.ReplaceAll(msg, t, "***")
 			}
 		}
@@ -110,13 +120,20 @@ func newLoadError(err error) error {
 
 // redactingWriter is an io.Writer that redacts secret values from every
 // chunk before forwarding it (used for cfggo's log output, whose lines
-// bypass our error-string redaction). It never replaces os.Stderr.
+// bypass our error-string redaction). It never replaces os.Stderr: a nil
+// out resolves os.Stderr AT WRITE TIME, so a test that swapped os.Stderr
+// to a pipe after install still has its writes reach the pipe instead of
+// being silently dropped to the install-time file.
 type redactingWriter struct {
 	out io.Writer
 }
 
 func (w redactingWriter) Write(p []byte) (int, error) {
-	_, err := io.WriteString(w.out, redactLoadError(string(p)))
+	out := w.out
+	if out == nil {
+		out = os.Stderr
+	}
+	_, err := io.WriteString(out, redactLoadError(string(p)))
 	return len(p), err
 }
 
@@ -131,7 +148,7 @@ var cfggoRedactOnce sync.Once
 
 func installCfggoRedaction() {
 	cfggoRedactOnce.Do(func() {
-		cfggo.SetLogOutput(redactingWriter{out: os.Stderr})
+		cfggo.SetLogOutput(redactingWriter{})
 	})
 }
 
