@@ -93,7 +93,7 @@ Define `Config` with cfggo. Canonical keys (snake_case; cfggo maps env/flags per
 | `server_token` | string (secret) | `""` | `COUNCIL_SERVER_TOKEN`; required for non-loopback binds; when set, cookie/bearer auth is enforced on every route except `GET /healthz`, `GET /`, `POST /api/session` |
 | `db_path` | string | `./data/council.db` | |
 | `gateway_base_url` | string | `http://localhost:4000` | LiteLLM |
-| `gateway_api_key` | string (secret) | `""` | |
+| `gateway_api_key` | string (secret) | `""` | `COUNCIL_GATEWAY_API_KEY`; required by every token-spending command; missing/blank/whitespace-only exits 1 before any work with no network; inspect with `council config diagnose`; `council config check --live` proves a key with exactly one gateway call |
 | `gateway_max_concurrent` | int | 8 | semaphore across all calls |
 | `views_deadline` | duration | `30s` | spec |
 | `judge_deadline` | duration | `30s` | spec |
@@ -479,10 +479,11 @@ council graders calibrate [--grader <key> | --all] | status
 council harness weekly [...] | sentinel | screen | compare --candidate <key> [--fresh] | downstream --candidate <key> --run <id> | report --run <id>
 council flags list [--run <id>] | confirm <id> --note "…" | dismiss <id> --note "…"
 council feedback summary --days 7
+council config show | reference | diagnose | check [--live]
 ```
 Exit codes: 0 ok, 1 error, 2 validation failure, 3 blocked (grader drift / checklist fail).
 
-**Bootstrap sequence (README):** `make build` → `mkdir -p data` → `db migrate` → `pack init` → `serve` (production is usable from here) → author `casepack/` and `calibration.yaml` → `cases load` → `graders calibrate --all` → `harness compare --candidate <key>` with the initial pack as sole candidate is unnecessary: instead `pack publish --baselines-only` (flag that only fills `baselines` for the active pack) → schedule `harness weekly --notify`.
+**Bootstrap sequence (README):** `make build` → `mkdir -p data` → `db migrate` → `pack init` → `export COUNCIL_GATEWAY_API_KEY=<your-gateway-api-key>` → `serve` (production is usable from here) → author `casepack/` and `calibration.yaml` → `cases load` → `graders calibrate --all` → `harness compare --candidate <key>` with the initial pack as sole candidate is unnecessary: instead `pack publish --baselines-only` (flag that only fills `baselines` for the active pack) → schedule `harness weekly --notify`.
 
 ## 14. n8n integration
 
