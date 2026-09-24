@@ -41,11 +41,15 @@ func run(args []string) int {
 			renderCommandHelp(e)
 			return exitOK
 		}
-		if len(args) == 3 && isHelpFlag(args[2:]) {
-			renderSubHelp("config", args[1])
-			return exitOK
+		if len(args) != 3 {
+			return configCmd(args[1:])
 		}
-		return configCmd(args[1:])
+		if !isHelpFlag(args[2:]) {
+			return configCmd(args[1:])
+		}
+		sub := args[1]
+		renderSubHelp("config", sub)
+		return exitOK
 	case "db":
 		return dispatch(args[0], args[1:], map[string]handler{
 			"migrate": dbMigrate,
@@ -88,21 +92,28 @@ func run(args []string) int {
 			"summary": feedbackSummary,
 		})
 	case "-h", "-help", "--help", "help":
-		if len(args) >= 2 {
-			if e, ok := registryByName(args[1]); ok {
-				if len(args) >= 3 {
-					for _, sub := range e.Subs {
-						if sub.Name == args[2] {
-							renderSubHelp(args[1], args[2])
-							return exitOK
-						}
-					}
-				}
-				renderCommandHelp(e)
+		if len(args) < 2 {
+			renderRootHelp()
+			return exitOK
+		}
+		top := args[1]
+		e, ok := registryByName(top)
+		if !ok {
+			renderRootHelp()
+			return exitOK
+		}
+		if len(args) < 3 {
+			renderCommandHelp(e)
+			return exitOK
+		}
+		want := args[2]
+		for _, sub := range e.Subs {
+			if sub.Name == want {
+				renderSubHelp(top, want)
 				return exitOK
 			}
 		}
-		renderRootHelp()
+		renderCommandHelp(e)
 		return exitOK
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q (want one of: serve db pack cases graders harness flags config feedback help; run `council help` for help)\n", args[0])
@@ -172,10 +183,4 @@ func serve(args []string) int {
 		return exitError
 	}
 	return exitOK
-}
-
-// usage prints root help to stdout. Kept for existing callers; new code
-// calls renderRootHelp directly.
-func usage() {
-	renderRootHelp()
 }

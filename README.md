@@ -18,10 +18,12 @@ make build
 mkdir -p data
 ./bin/council db migrate
 ./bin/council pack init --file config/pack.yaml
+export COUNCIL_GATEWAY_API_KEY='<your-gateway-api-key>'
 ./bin/council serve
 ```
 
-Make a first request (the server listens on loopback by default, so no
+`serve` refuses without a key (exit 1, no network), so export it first
+(see [API keys](#api-keys-and-the-fail-fast-gate)). Make a first request (the server listens on loopback by default, so no
 token is needed from the same machine):
 
 ```sh
@@ -180,14 +182,14 @@ the source of truth. `no` means the command makes no model calls.
 The errors users actually hit:
 
 - **No key**: `harness sentinel: missing COUNCIL_GATEWAY_API_KEY:
-  run `+"`council config diagnose`"+` to inspect config, then export
+  run `council config diagnose` to inspect config, then export
   COUNCIL_GATEWAY_API_KEY='your-key'` — export the key; nothing was
   spent and nothing was sent.
 - **Nothing to check**: `config check: nothing to check without --live`
   — `config check` needs the `--live` flag to make its one call.
 - **Unknown command**: `unknown subcommand "bogus" (want one of: serve
   db pack cases graders harness flags config feedback help; run
-  `+"`council help`"+` for help)` (exit 2) — check the name, or run
+  `council help` for help)` (exit 2) — check the name, or run
   `council help`.
 - **Bad flag**: exit 2 from the flag parser (e.g. `harness weekly:
   harness: unknown weekly step "bogus" (want
@@ -211,10 +213,11 @@ The errors users actually hit:
 make build
 mkdir -p data
 ./bin/council db migrate
+export COUNCIL_GATEWAY_API_KEY='<your-gateway-api-key>'
 ./bin/council serve
 ```
 
-`council serve` binds loopback-only by default. Binding any
+`council serve` refuses without a key (exit 1) and binds loopback-only by default. Binding any
 non-loopback address refuses to start unless `COUNCIL_SERVER_TOKEN` is
 set; when set, the API requires it on every route except
 `GET /healthz`, the static UI shell (`GET /`), and `POST /api/session`.
@@ -237,6 +240,7 @@ mkdir -p data
 ./bin/council pack init --file config/pack.yaml
 ./bin/council cases validate
 ./bin/council cases load
+export COUNCIL_GATEWAY_API_KEY='<your-gateway-api-key>'
 ./bin/council graders calibrate --all
 ./bin/council graders status
 ./bin/council pack publish --baselines-only

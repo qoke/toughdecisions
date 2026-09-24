@@ -178,7 +178,14 @@ func registryByName(name string) (HelpEntry, bool) {
 
 // isHelpFlag reports whether args is exactly one help flag.
 func isHelpFlag(args []string) bool {
-	return len(args) == 1 && (args[0] == "-h" || args[0] == "-help" || args[0] == "--help")
+	if len(args) != 1 {
+		return false
+	}
+	switch args[0] {
+	case "-h", "-help", "--help":
+		return true
+	}
+	return false
 }
 
 // renderRootHelp prints every registered command with its one-line purpose.
