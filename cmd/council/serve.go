@@ -33,7 +33,7 @@ func serveHTTP(cfg *config.Config, log logx.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load models: %w", err)
 	}
-	gw := gateway.New(&http.Client{}, cfg.GatewayBaseURL(), cfg.GatewayAPIKey(), cfg.GatewayMaxConcurrent(), log)
+	gw := gateway.New(&http.Client{}, cfg.GatewayBaseURL(), normalizeGatewayKey(cfg.GatewayAPIKey()), cfg.GatewayMaxConcurrent(), log)
 	reg := council.NewRegistry(5 * time.Minute)
 	defer reg.Close()
 	runner := council.NewRunner(db, gw, reg, cfg, log, mreg)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -18,11 +19,53 @@ func TestUnknownSubcommandExit2(t *testing.T) {
 }
 
 func TestMissingSubcommandExit2(t *testing.T) {
-	if got := run([]string{"db"}); got != exitValidation {
-		t.Fatalf("db missing = %d, want %d", got, exitValidation)
+	out, code := captureStdout(t, func() int { return run([]string{"db"}) })
+	if code != exitValidation {
+		t.Fatalf("db missing = %d, want %d", code, exitValidation)
 	}
-	if got := run(nil); got != exitValidation {
-		t.Fatalf("empty = %d, want %d", got, exitValidation)
+	if !strings.Contains(out, "db") {
+		t.Fatalf("db missing help = %q, want group help", out)
+	}
+}
+
+func TestBareRunPrintsRootHelpOnStdout(t *testing.T) {
+	out, code := captureStdout(t, func() int { return run(nil) })
+	if code != exitOK {
+		t.Fatalf("bare run = %d, want %d", code, exitOK)
+	}
+	for _, e := range commandRegistry {
+		if !strings.Contains(out, e.Name) {
+			t.Fatalf("bare run help missing command %q", e.Name)
+		}
+	}
+}
+
+func TestConfigShowWired(t *testing.T) {
+	out, code := captureStdout(t, func() int { return run([]string{"config", "show"}) })
+	if code != exitOK {
+		t.Fatalf("config show = %d, want %d (%q)", code, exitOK, out)
+	}
+}
+
+func TestServeMissingKeyGate(t *testing.T) {
+	t.Setenv("COUNCIL_GATEWAY_API_KEY", "")
+	oldErr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	done := make(chan string, 1)
+	go func() {
+		raw, _ := io.ReadAll(r)
+		done <- string(raw)
+	}()
+	code := run([]string{"serve"})
+	_ = w.Close()
+	os.Stderr = oldErr
+	msg := <-done
+	if code != exitError {
+		t.Fatalf("serve without key = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(msg, "COUNCIL_GATEWAY_API_KEY") {
+		t.Fatalf("serve stderr = %q, want it to name COUNCIL_GATEWAY_API_KEY", msg)
 	}
 }
 
@@ -168,11 +211,32 @@ func TestPackRollbackCommand(t *testing.T) {
 }
 
 func TestServeConfigErrorAndPackInitBranches(t *testing.T) {
-	// Invalid log level forces config.Load to fail -> serve exit 1.
+	// Invalid log level forces config.Load to fail -> serve exit 1 naming
+	// log_level (the config-load branch, not the missing-key gate).
 	t.Setenv("COUNCIL_LOG_LEVEL", "bogus")
-	if got := run([]string{"serve"}); got != exitError {
-		t.Fatalf("serve bad config = %d, want %d", got, exitError)
-	}
+	func() {
+		oldErr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+		done := make(chan string, 1)
+		go func() {
+			raw, _ := io.ReadAll(r)
+			done <- string(raw)
+		}()
+		code := run([]string{"serve"})
+		_ = w.Close()
+		os.Stderr = oldErr
+		msg := <-done
+		if code != exitError {
+			t.Fatalf("serve bad config = %d, want %d", code, exitError)
+		}
+		if !strings.Contains(msg, "log_level") {
+			t.Fatalf("serve bad config stderr = %q, want it to name log_level", msg)
+		}
+		if strings.Contains(msg, "COUNCIL_GATEWAY_API_KEY") {
+			t.Fatalf("serve bad config stderr = %q, must be the config-load branch, not the key gate", msg)
+		}
+	}()
 	t.Setenv("COUNCIL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("COUNCIL_DB_PATH", dir+"/c.db")

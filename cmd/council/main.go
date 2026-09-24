@@ -24,12 +24,28 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		usage()
-		return exitValidation
+		renderRootHelp()
+		return exitOK
 	}
 	switch args[0] {
 	case "serve":
+		if isHelpFlag(args[1:]) {
+			e, _ := registryByName("serve")
+			renderCommandHelp(e)
+			return exitOK
+		}
 		return serve(args[1:])
+	case "config":
+		if isHelpFlag(args[1:]) {
+			e, _ := registryByName("config")
+			renderCommandHelp(e)
+			return exitOK
+		}
+		if len(args) == 3 && isHelpFlag(args[2:]) {
+			renderSubHelp("config", args[1])
+			return exitOK
+		}
+		return configCmd(args[1:])
 	case "db":
 		return dispatch(args[0], args[1:], map[string]handler{
 			"migrate": dbMigrate,
@@ -72,11 +88,25 @@ func run(args []string) int {
 			"summary": feedbackSummary,
 		})
 	case "-h", "-help", "--help", "help":
-		usage()
+		if len(args) >= 2 {
+			if e, ok := registryByName(args[1]); ok {
+				if len(args) >= 3 {
+					for _, sub := range e.Subs {
+						if sub.Name == args[2] {
+							renderSubHelp(args[1], args[2])
+							return exitOK
+						}
+					}
+				}
+				renderCommandHelp(e)
+				return exitOK
+			}
+		}
+		renderRootHelp()
 		return exitOK
 	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", args[0])
-		usage()
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q (want one of: serve db pack cases graders harness flags config feedback help; run `council help` for help)\n", args[0])
+		renderRootHelp()
 		return exitValidation
 	}
 }
@@ -89,13 +119,34 @@ func stub(name string) handler {
 
 func dispatch(top string, args []string, subs map[string]handler) int {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "%s: missing subcommand\n", top)
+		if e, ok := registryByName(top); ok {
+			renderCommandHelp(e)
+		}
 		return exitValidation
+	}
+	if isHelpFlag(args) {
+		if e, ok := registryByName(top); ok {
+			renderCommandHelp(e)
+			return exitOK
+		}
 	}
 	h, ok := subs[args[0]]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "%s: unknown subcommand %q\n", top, args[0])
+		if isHelpFlag(args) {
+			if e, ok := registryByName(top); ok {
+				renderCommandHelp(e)
+				return exitOK
+			}
+		}
+		fmt.Fprintf(os.Stderr, "%s: unknown subcommand %q (run `council %s --help` or `council help` for help)\n", top, args[0], top)
+		if e, ok := registryByName(top); ok {
+			renderCommandHelp(e)
+		}
 		return exitValidation
+	}
+	if isHelpFlag(args[1:]) {
+		renderSubHelp(top, args[0])
+		return exitOK
 	}
 	return h(args[1:])
 }
@@ -110,6 +161,10 @@ func serve(args []string) int {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 		return exitError
 	}
+	if err := requireGatewayKey(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
+		return exitError
+	}
 	log := logx.New(cfg)
 	log.Debug("effective config", "config", cfg.RedactedString())
 	if err := serveHTTP(cfg, log); err != nil {
@@ -119,16 +174,8 @@ func serve(args []string) int {
 	return exitOK
 }
 
+// usage prints root help to stdout. Kept for existing callers; new code
+// calls renderRootHelp directly.
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: council <subcommand> [flags]
-
-  serve
-  db migrate | db prune --older-than <days>
-  pack init|show|publish|rollback
-  cases validate|load
-  graders calibrate|status
-  harness weekly|sentinel|screen|compare|downstream|report
-  flags list|confirm|dismiss
-  feedback summary
-`)
+	renderRootHelp()
 }
